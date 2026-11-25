@@ -6,6 +6,7 @@ import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
+import android.graphics.Color;
 import android.graphics.LinearGradient;
 import android.graphics.Matrix;
 import android.graphics.Paint;
@@ -35,6 +36,7 @@ import java.util.Random;
 final class AuroraBackdropView extends View {
     private final Paint orbPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.DITHER_FLAG);
     private final Paint dimPaint = new Paint();
+    private final Paint searchDimPaint = new Paint();
     private final Paint bmpPaint = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG);
     private final Matrix shaderMatrix = new Matrix();
     private final Rect dstRect = new Rect();
@@ -55,6 +57,10 @@ final class AuroraBackdropView extends View {
     private float touchParallaxX = 0.85f;
     private float touchParallaxY = 0.5f;
     private float touchGlowStrength = 0f;
+    /** 搜索过渡进度：0.0（首屏）→ 1.0（完全搜索态）。 */
+    private float searchProgress = 0f;
+    private static final float SEARCH_MIN_SCALE = 0.96f;
+    private static final float SEARCH_MAX_DIM = 0.35f;
     private final long t0 = SystemClock.uptimeMillis();
     private long resumeFreezeUntilMs = 0L;
     private int cachedSolarPhase = WeatherSyncEngine.SOLAR_DAY;
@@ -149,6 +155,17 @@ final class AuroraBackdropView extends View {
         }
     }
 
+    /**
+     * 搜索呼出景深联动：壁纸场景平滑微缩放 1.0 → 0.96，并叠加最高 35% 的压暗遮罩。
+     * 遮罩始终铺满屏幕（不随缩放），系统壁纸主题仅执行压暗（系统壁纸由 WallpaperManager 托管，无法被应用缩放）。
+     */
+    void setSearchTransitionProgress(float progress) {
+        float p = Math.max(0f, Math.min(1f, progress));
+        if (Math.abs(p - searchProgress) < 0.0005f) return;
+        searchProgress = p;
+        invalidate();
+    }
+
     void onWaveInteract(float normX, float normY, float strength) {
         this.touchParallaxX = normX;
         this.touchParallaxY = normY;
@@ -204,7 +221,15 @@ final class AuroraBackdropView extends View {
             int styleIdx = Math.max(0, Math.min(5, theme.presetIdx));
             Bitmap scene = ensureDesktopSceneBitmap(w, h, styleIdx, phase);
             dstRect.set(0, 0, w, h);
+            // 先铺满原尺寸底图，再在其上绘制微缩放场景，避免缩放后四周露出空白
             canvas.drawBitmap(scene, null, dstRect, bmpPaint);
+            int sceneSave = -1;
+            if (searchProgress > 0.001f) {
+                float sc = 1.0f - (1.0f - SEARCH_MIN_SCALE) * searchProgress;
+                sceneSave = canvas.save();
+                canvas.scale(sc, sc, w * 0.5f, h * 0.5f);
+                canvas.drawBitmap(scene, null, dstRect, bmpPaint);
+            }
 
             // 叠加轻微流动极光光晕，让桌面保持柔和生命力
             if (unitOrbShaders != null && unitOrbShaders.length > 0 && animateFlow) {
@@ -230,11 +255,19 @@ final class AuroraBackdropView extends View {
                 orbPaint.setAlpha(255);
             }
 
+            if (sceneSave >= 0) canvas.restoreToCount(sceneSave);
+
             if (userDimPercent > 0) {
                 int alpha = Math.min(200, (int) (userDimPercent / 100f * 255));
                 dimPaint.setColor((alpha << 24) | (theme.isLight ? 0xFFF7F2E8 : 0x090D16));
                 canvas.drawRect(0, 0, w, h, dimPaint);
             }
+        }
+
+        if (searchProgress > 0.001f) {
+            searchDimPaint.setColor(Color.BLACK);
+            searchDimPaint.setAlpha(Math.round(255f * SEARCH_MAX_DIM * searchProgress));
+            canvas.drawRect(0, 0, w, h, searchDimPaint);
         }
 
         if (touchGlowStrength > 0.02f && unitGlowShader != null) {

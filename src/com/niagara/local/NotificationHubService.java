@@ -3,6 +3,8 @@ package com.niagara.local;
 import android.app.Notification;
 import android.app.PendingIntent;
 import android.app.RemoteInput;
+import android.content.Context;
+import android.content.Intent;
 import android.os.Bundle;
 import android.service.notification.NotificationListenerService;
 import android.service.notification.StatusBarNotification;
@@ -34,6 +36,8 @@ public class NotificationHubService extends NotificationListenerService {
         boolean isClearable;
         PendingIntent contentIntent;
         Notification.Action quickReplyAction;
+        /** 不含 RemoteInput 的常规动作（标记已读/暂停等），至多保留 2 个供 Pop-up 渲染为胶囊钮。 */
+        List<Notification.Action> plainActions = Collections.emptyList();
     }
 
     static volatile Set<String> activePackages = Collections.emptySet();
@@ -187,13 +191,22 @@ public class NotificationHubService extends NotificationListenerService {
                     item.isClearable = sbn.isClearable();
                     item.contentIntent = n.contentIntent;
                     if (n.actions != null) {
+                        List<Notification.Action> plain = null;
                         for (Notification.Action act : n.actions) {
+                            if (act == null) continue;
                             RemoteInput[] ris = act.getRemoteInputs();
-                            if (ris != null && ris.length > 0 && act.actionIntent != null) {
-                                item.quickReplyAction = act;
-                                break;
+                            boolean hasRemoteInput = ris != null && ris.length > 0;
+                            if (hasRemoteInput) {
+                                if (item.quickReplyAction == null && act.actionIntent != null) {
+                                    item.quickReplyAction = act;
+                                }
+                            } else if (act.actionIntent != null && act.title != null
+                                    && act.title.length() > 0 && (plain == null || plain.size() < 2)) {
+                                if (plain == null) plain = new ArrayList<>(2);
+                                plain.add(act);
                             }
                         }
+                        if (plain != null) item.plainActions = plain;
                     }
 
                     List<NotifItem> bucket = listMap.get(pkgName);
@@ -249,6 +262,84 @@ public class NotificationHubService extends NotificationListenerService {
         } catch (Throwable t) {
             return false;
         }
+    }
+
+    // ---------- v2.6.0 Pop-up 浮层辅助：查询 / 清除 / 快捷回复 ----------
+
+    /** 按包名获取当前未被清除的活跃通知（最新在前，至多 5 条）。永不返回 null，返回只读快照。 */
+    static List<NotifItem> getAllByPackage(String pkg) {
+        if (pkg == null) return Collections.emptyList();
+        List<NotifItem> list = allByPkg.get(pkg);
+        if (list == null || list.isEmpty()) return Collections.emptyList();
+        return Collections.unmodifiableList(new ArrayList<>(list));
+    }
+
+    /** 根据通知 Key 主动清除，并立即在本地快照中剔除，让桌面行摘要/计数即时刷新（系统回调随后会校准）。 */
+    static boolean dismissNotification(String sbnKey) {
+        if (sbnKey == null || !cancelByKey(sbnKey)) return false;
+        Map<String, List<NotifItem>> src = allByPkg;
+        Map<String, List<NotifItem>> nextAll = new HashMap<>();
+        Map<String, NotifItem> nextLatest = new HashMap<>();
+        Map<String, Integer> nextCounts = new HashMap<>();
+        for (Map.Entry<String, List<NotifItem>> e : src.entrySet()) {
+            List<NotifItem> kept = new ArrayList<>();
+            for (NotifItem it : e.getValue()) {
+                if (it != null && !sbnKey.equals(it.key)) kept.add(it);
+            }
+            if (kept.isEmpty()) continue;
+            nextAll.put(e.getKey(), kept);
+            nextCounts.put(e.getKey(), kept.size());
+            nextLatest.put(e.getKey(), kept.get(0));
+        }
+        allByPkg = nextAll;
+        latestByPkg = nextLatest;
+        countByPkg = nextCounts;
+        notifyLauncher();
+        return true;
+    }
+
+    /** 提取支持直接回复的 RemoteInput 悬挂 Intent；逐层校验，结构不规范的第三方通知返回 null。 */
+    static PendingIntent getQuickReplyAction(NotifItem info) {
+        if (info == null || info.quickReplyAction == null) return null;
+        try {
+            RemoteInput[] ris = info.quickReplyAction.getRemoteInputs();
+            if (ris == null || ris.length == 0) return null;
+            return info.quickReplyAction.actionIntent;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** 通过通知自带的 RemoteInput 直接发送回复文本。 */
+    static boolean sendQuickReply(Context ctx, NotifItem info, String text) {
+        PendingIntent pi = getQuickReplyAction(info);
+        if (pi == null || ctx == null || text == null || text.trim().isEmpty()) return false;
+        try {
+            RemoteInput[] ris = info.quickReplyAction.getRemoteInputs();
+            Intent fill = new Intent();
+            Bundle results = new Bundle();
+            for (RemoteInput r : ris) {
+                if (r != null && r.getResultKey() != null) {
+                    results.putCharSequence(r.getResultKey(), text);
+                }
+            }
+            RemoteInput.addResultsToIntent(ris, fill, results);
+            pi.send(ctx, 0, fill);
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /** 相对时间文案：刚刚 / N分钟前 / N小时前 / N天前。 */
+    static String formatRelativeTime(long whenMs) {
+        long diff = System.currentTimeMillis() - whenMs;
+        if (whenMs <= 0 || diff < 60_000L) return "刚刚";
+        long min = diff / 60_000L;
+        if (min < 60) return min + "分钟前";
+        long hr = min / 60;
+        if (hr < 24) return hr + "小时前";
+        return (hr / 24) + "天前";
     }
 
     static int cancelAllForPackage(String pkg) {

@@ -9,10 +9,14 @@ import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.os.Build;
 import android.os.SystemClock;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
+import android.provider.Settings;
 import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.animation.OvershootInterpolator;
+import android.view.animation.PathInterpolator;
 
 import java.util.Collections;
 import java.util.Map;
@@ -25,7 +29,11 @@ import java.util.Set;
  *    按住上下滑动、向内滑动或点按字母均 100% 灵敏响应字母快捷搜索，彻底解决所有应用页无法使用右手字母快捷搜索的 Bug；
  * 2. 【全高度防系统返回手势误抢】updateGestureExclusionRects 始终排除右侧字母导轨区域的系统边缘手势，确保所有应用模式下右手滑字母不被系统侧滑返回抢占；
  * 3. 【点按 ★ 瞬时返回首页】在全部应用模式下轻点顶部 ★ 即可一键回到首页常用应用；
- * 4. 【模式切换冷却锁】从搜索返回常用应用时开启短暂冷却锁，避免残余触控误触。
+ * 4. 【模式切换冷却锁】从搜索返回常用应用时开启短暂冷却锁，避免残余触控误触；
+ * 5. 【v2.6.0 高斯正态波浪包络】波浪形变因数 f(y) = exp(-(y-y0)^2 / (2σ^2))，替代原分段折线，边缘无折角；
+ * 6. 【v2.6.0 精准手势排除区】触点上下各 90dp 的系统边缘手势排除区实时跟随，松手 300ms 后回到拇指常驻区；
+ * 7. 【v2.6.0 防抖微震】跨越字母临界点触发 EFFECT_TICK / CLOCK_TICK，12ms 最小窗口防止马达粘连；
+ * 8. 【v2.6.0 主列表联动】通过 OnWaveScrubListener 向外同步擦拭状态，驱动主列表横向内推与回弹。
  */
 final class NiagaraWaveView extends View {
 
@@ -34,6 +42,28 @@ final class NiagaraWaveView extends View {
         void onWaveRelease(int index, char letter, boolean triggerPullLaunch);
         void onWaveBackSwipe();
     }
+
+    /** 波浪擦拭状态监听：供主列表做高斯横向内推联动（仅回调主线程）。 */
+    interface OnWaveScrubListener {
+        void onWaveScrubStart();
+        /**
+         * @param currentLetter  当前命中的字母/符号
+         * @param progress       触点在导轨内的归一化纵向进度 [0,1]
+         * @param touchScreenY   触点的屏幕绝对 Y 坐标（px）
+         */
+        void onWaveScrub(char currentLetter, float progress, float touchScreenY);
+        void onWaveScrubEnd();
+    }
+
+    /** 高斯波峰最大横向偏移 (dp) 与标准差 σ (dp)。 */
+    private static final float MAX_WAVE_PEAK_DP = 52f;
+    private static final float WAVE_SIGMA_DP = 48f;
+    /** 系统手势排除区：跟随时触点上下各 90dp（总高 180dp ≤ 系统 200dp 上限），常驻区 160dp。 */
+    private static final float EXCLUSION_TRACK_HALF_DP = 90f;
+    private static final float EXCLUSION_IDLE_HEIGHT_DP = 160f;
+    private static final long EXCLUSION_RESET_DELAY_MS = 300L;
+    /** 触觉防抖：相邻两次微震的最小间隔。 */
+    private static final long HAPTIC_MIN_INTERVAL_MS = 12L;
 
     private final String symbols;
     private final float dp;
@@ -53,6 +83,11 @@ final class NiagaraWaveView extends View {
     private NiagaraWaveView delegateTarget;
     private NiagaraWaveView sourceGhostBar;
     private Listener listener;
+    private OnWaveScrubListener scrubListener;
+    private boolean scrubActive = false;
+    private long lastHapticUptimeMs = 0L;
+    private Vibrator vibrator;
+    private final int[] screenLoc = new int[2];
 
     private float touchY = -1f;
     private float smoothY = -1f;
@@ -73,6 +108,13 @@ final class NiagaraWaveView extends View {
     private boolean backSwipeHandled = false;
     private boolean touchFromLeft = false;
     private long cooldownUntilMs = 0L;
+
+    private final Runnable resetExclusionTask = new Runnable() {
+        @Override
+        public void run() {
+            restoreIdleExclusions();
+        }
+    };
 
     private final Runnable delayedEngageTask = new Runnable() {
         @Override
@@ -116,13 +158,15 @@ final class NiagaraWaveView extends View {
     void setBackSwipePreferred(boolean preferred) {
         this.backSwipePreferred = preferred;
         if (Build.VERSION.SDK_INT >= 29 && isLaidOut()) {
-            clearAllDynamicExclusions();
+            restoreIdleExclusions();
         }
     }
 
     void cancelAndCooldown(long durationMs) {
         cooldownUntilMs = SystemClock.uptimeMillis() + durationMs;
         removeCallbacks(delayedEngageTask);
+        removeCallbacks(resetExclusionTask);
+        dispatchScrubEnd();
         waveEngaged = false;
         backSwipeHandled = false;
         pullArmed = false;
@@ -131,7 +175,7 @@ final class NiagaraWaveView extends View {
         touchY = -1f;
         smoothY = -1f;
         velocityY = 0f;
-        clearAllDynamicExclusions();
+        restoreIdleExclusions();
         if (releaseAnim != null) releaseAnim.cancel();
         if (pullExpandAnim != null) pullExpandAnim.cancel();
         pullExpandFrac = 0f;
@@ -141,6 +185,27 @@ final class NiagaraWaveView extends View {
 
     void setListener(Listener l) {
         this.listener = l;
+    }
+
+    void setOnWaveScrubListener(OnWaveScrubListener l) {
+        this.scrubListener = l;
+    }
+
+    /** 当前（或最近一次）擦拭是否从左侧边缘发起，供主列表决定内推方向。 */
+    boolean isScrubFromLeft() {
+        return touchFromLeft;
+    }
+
+    private void dispatchScrubEnd() {
+        if (scrubActive) {
+            scrubActive = false;
+            if (scrubListener != null) scrubListener.onWaveScrubEnd();
+        }
+    }
+
+    private float toScreenY(float localY) {
+        getLocationOnScreen(screenLoc);
+        return screenLoc[1] + localY;
     }
 
     void setAvailableData(Set<Character> available, Map<Character, String> previewMap) {
@@ -156,33 +221,40 @@ final class NiagaraWaveView extends View {
         return Math.max(1f, getHeight() / (float) symbols.length());
     }
 
-    private float flatTopFactor(float indexDist) {
-        final float rampWidth = 9.5f;
-        if (indexDist <= 0.0f) return 1.0f;
-        if (indexDist >= rampWidth) return 0.0f;
-        float t = indexDist / rampWidth;
-        return 1.0f - (t * t * (3f - 2f * t));
+    /** 高斯正态包络：f = exp(-(Δy)^2 / (2σ^2))，返回 [0,1]。 */
+    private float calculateGaussianFactor(float itemCenterY, float touchY, float sigma) {
+        float d = itemCenterY - touchY;
+        return (float) Math.exp(-(d * d) / (2.0f * sigma * sigma));
     }
 
     @Override
     protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
         super.onLayout(changed, left, top, right, bottom);
         if (Build.VERSION.SDK_INT >= 29) {
-            clearAllDynamicExclusions();
+            updateSystemGestureExclusion(-1f, false);
         }
     }
 
-    void updateDynamicExclusionRect(float currentY) {
+    /**
+     * 更新系统边缘手势排除区。
+     * 跟随态：以触点 Y 为中心上下各 90dp（总高 180dp ≤ 200dp 系统上限），到边界时整体平移以保持高度；
+     * 常驻态：覆盖拇指黄金停留区（约 45% 高度处起 160dp）。坐标系为本 View 局部坐标。
+     */
+    void updateSystemGestureExclusion(float touchLocalY, boolean isTracking) {
         if (Build.VERSION.SDK_INT < 29) return;
         int h = getHeight();
         int w = getWidth();
         if (w <= 0 || h <= 0) return;
-        int rw = (int) railWidth();
-        int exH = (int) Math.min(h, 200 * dp);
-        int topY = (int) Math.max(0, Math.min(h - exH, currentY - exH / 2f));
+        int rw = Math.min(w, (int) railWidth());
+        int span = (int) Math.min(h, (isTracking ? EXCLUSION_TRACK_HALF_DP * 2f : EXCLUSION_IDLE_HEIGHT_DP) * dp);
+        int maxTop = Math.max(0, h - span);
+        int topY = isTracking
+                ? Math.round(touchLocalY - EXCLUSION_TRACK_HALF_DP * dp)
+                : (int) (h * 0.45f);
+        topY = Math.max(0, Math.min(maxTop, topY));
         Rect r = alignLeft
-                ? new Rect(0, topY, Math.min(w, rw), topY + exH)
-                : new Rect(Math.max(0, w - rw), topY, w, topY + exH);
+                ? new Rect(0, topY, rw, topY + span)
+                : new Rect(w - rw, topY, w, topY + span);
         setSystemGestureExclusionRects(Collections.singletonList(r));
     }
 
@@ -192,23 +264,31 @@ final class NiagaraWaveView extends View {
         }
     }
 
+    /** 触点所在导轨进入跟随态，另一侧导轨保持常驻态。 */
     private void applyDynamicExclusion(float currentY, boolean fromLeft) {
+        removeCallbacks(resetExclusionTask);
         if (fromLeft && sourceGhostBar != null) {
-            sourceGhostBar.updateDynamicExclusionRect(currentY);
-            clearGestureExclusionRects();
+            sourceGhostBar.updateSystemGestureExclusion(currentY, true);
+            updateSystemGestureExclusion(-1f, false);
         } else {
-            updateDynamicExclusionRect(currentY);
+            updateSystemGestureExclusion(currentY, true);
             if (sourceGhostBar != null) {
-                sourceGhostBar.clearGestureExclusionRects();
+                sourceGhostBar.updateSystemGestureExclusion(-1f, false);
             }
         }
     }
 
-    private void clearAllDynamicExclusions() {
-        clearGestureExclusionRects();
+    private void restoreIdleExclusions() {
+        updateSystemGestureExclusion(-1f, false);
         if (sourceGhostBar != null) {
-            sourceGhostBar.clearGestureExclusionRects();
+            sourceGhostBar.updateSystemGestureExclusion(-1f, false);
         }
+    }
+
+    /** 松手后延时 300ms 平滑回到常驻排除区，避免边缘手势死锁或瞬间放开造成误触返回。 */
+    private void scheduleExclusionReset() {
+        removeCallbacks(resetExclusionTask);
+        postDelayed(resetExclusionTask, EXCLUSION_RESET_DELAY_MS);
     }
 
     @Override
@@ -228,25 +308,29 @@ final class NiagaraWaveView extends View {
                 smoothY = touchY;
                 velocityY = 0f;
             } else {
+                // 过阻尼弹簧跟随：v' = 0.20v + 0.30Δ，特征根均为实数（≈0.5/0.4），无过冲、无抖动，跟手且顺滑
                 float diff = touchY - smoothY;
-                velocityY = velocityY * 0.45f + diff * 0.35f;
+                velocityY = velocityY * 0.20f + diff * 0.30f;
                 smoothY += velocityY;
                 if (Math.abs(diff) > 0.35f || Math.abs(velocityY) > 0.25f) {
                     postInvalidateOnAnimation();
+                } else {
+                    smoothY = touchY;
+                    velocityY = 0f;
                 }
             }
         }
 
+        float sigma = WAVE_SIGMA_DP * dp;
         float extraPull = Math.min(26f * dp, Math.max(0f, pullDepthPx - railWidth()) * 0.30f);
-        float maxShiftPx = (66f * dp + extraPull) * waveStrength;
-        float centerIdxFloat = (smoothY >= 0) ? (smoothY / slot - 0.5f) : -100f;
+        float maxShiftPx = (MAX_WAVE_PEAK_DP * dp + extraPull) * waveStrength;
+        boolean waving = waveStrength > 0.01f && smoothY >= 0;
 
         for (int i = 0; i < symbols.length(); i++) {
             char ch = symbols.charAt(i);
             float drawY = slot * i + slot * 0.5f;
-            float factor = (waveStrength > 0.01f && smoothY >= 0)
-                    ? flatTopFactor(Math.abs(i - centerIdxFloat))
-                    : 0f;
+            float factor = waving ? calculateGaussianFactor(drawY, smoothY, sigma) : 0f;
+            float focus = Math.min(1f, factor * waveStrength);
             float drawX = baseX + dir * maxShiftPx * factor;
             boolean isActive = (i == activeIdx && waveStrength > 0.12f);
 
@@ -260,8 +344,11 @@ final class NiagaraWaveView extends View {
             } else {
                 color = (theme.textSecondary & 0x00FFFFFF) | (waveStrength > 0.1f ? 0x66000000 : 0x34000000);
             }
+            // 焦点字母 100% 不透明，远端字母随波浪强度衰减至 45%
+            float alphaMul = 1f - 0.55f * waveStrength * (1f - factor);
             letterPaint.setColor(color);
-            letterPaint.setTextSize((isActive ? 12.6f : 10.2f) * dp);
+            letterPaint.setAlpha(Math.round(((color >>> 24) & 0xFF) * Math.max(0.2f, Math.min(1f, alphaMul))));
+            letterPaint.setTextSize(10.2f * dp * (1f + 0.65f * focus));
             letterPaint.setTypeface(isActive ? Typeface.create(typeface, Typeface.BOLD) : typeface);
 
             float baseline = drawY - (letterPaint.descent() + letterPaint.ascent()) * 0.5f;
@@ -271,7 +358,8 @@ final class NiagaraWaveView extends View {
         if (activeIdx >= 0 && waveStrength > 0.06f && smoothY >= 0) {
             char ch = symbols.charAt(activeIdx);
             float badgeScale = Math.min(1f, waveStrength * 1.12f);
-            float activeDrawX = baseX + dir * maxShiftPx * flatTopFactor(Math.abs(activeIdx - centerIdxFloat));
+            float activeDrawY = slot * activeIdx + slot * 0.5f;
+            float activeDrawX = baseX + dir * maxShiftPx * calculateGaussianFactor(activeDrawY, smoothY, sigma);
             float circleR = 19.0f * dp * badgeScale;
             float circleCx = activeDrawX + dir * 34f * dp * badgeScale;
             float circleCy = Math.max(circleR + 8f * dp, Math.min(h - circleR - 8f * dp, smoothY - 4f * dp));
@@ -344,7 +432,47 @@ final class NiagaraWaveView extends View {
         velocityY = 0f;
         applyDynamicExclusion(y, fromLeft);
         animateStrength(1f);
+        if (!scrubActive) {
+            scrubActive = true;
+            if (scrubListener != null) scrubListener.onWaveScrubStart();
+        }
         updateActiveLetterAndNotify(y, inwardDepthPx, fromLeft);
+    }
+
+    /**
+     * 跨越字母临界点的精准微震：Android 10+ 优先 EFFECT_TICK，8.0/9.0 使用 10ms 微脉冲，
+     * 其余降级 CLOCK_TICK；12ms 最小窗口防抖，系统关闭触感反馈时静默。
+     */
+    void performWaveHapticFeedback() {
+        long now = SystemClock.uptimeMillis();
+        if (now - lastHapticUptimeMs < HAPTIC_MIN_INTERVAL_MS) return;
+        lastHapticUptimeMs = now;
+        try {
+            if (Settings.System.getInt(getContext().getContentResolver(),
+                    Settings.System.HAPTIC_FEEDBACK_ENABLED, 1) == 0) {
+                return;
+            }
+        } catch (Throwable ignored) {}
+        try {
+            if (vibrator == null) {
+                vibrator = (Vibrator) getContext().getSystemService(Context.VIBRATOR_SERVICE);
+            }
+            if (vibrator != null && vibrator.hasVibrator()) {
+                if (Build.VERSION.SDK_INT >= 29) {
+                    vibrator.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK));
+                } else {
+                    vibrator.vibrate(VibrationEffect.createOneShot(10L, 85));
+                }
+                return;
+            }
+        } catch (Throwable ignored) {}
+        performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK,
+                HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING);
+    }
+
+    /** 松手后波浪带物理阻尼回弹至静止态（贝塞尔 0.25,1,0.5,1）。 */
+    void animateRebound() {
+        animateStrength(0f);
     }
 
     private void updateActiveLetterAndNotify(float y, float inwardDepthPx, boolean fromLeft) {
@@ -365,8 +493,7 @@ final class NiagaraWaveView extends View {
                 pullArmed = nowArmed;
                 animatePullExpand(nowArmed ? 1f : 0f);
             }
-            performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK,
-                    HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING);
+            performWaveHapticFeedback();
         } else if (nowArmed != pullArmed) {
             pullArmed = nowArmed;
             animatePullExpand(nowArmed ? 1f : 0f);
@@ -382,6 +509,9 @@ final class NiagaraWaveView extends View {
                     touchY / getHeight(),
                     Math.max(0.3f, waveStrength),
                     pullArmed);
+        }
+        if (scrubListener != null && scrubActive && getHeight() > 0) {
+            scrubListener.onWaveScrub(symbols.charAt(activeIdx), touchY / getHeight(), toScreenY(touchY));
         }
         postInvalidateOnAnimation();
     }
@@ -443,7 +573,7 @@ final class NiagaraWaveView extends View {
         }
         if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
             removeCallbacks(delayedEngageTask);
-            clearAllDynamicExclusions();
+            scheduleExclusionReset();
             if (backSwipeHandled) {
                 backSwipeHandled = false;
                 return true;
@@ -477,7 +607,8 @@ final class NiagaraWaveView extends View {
             pullArmed = false;
             pullDepthPx = 0f;
             animatePullExpand(0f);
-            animateStrength(0f);
+            animateRebound();
+            dispatchScrubEnd();
             if (listener != null) {
                 listener.onWaveRelease(finalIdx, finalChar, launch);
             }
@@ -502,6 +633,7 @@ final class NiagaraWaveView extends View {
         releaseAnim = ValueAnimator.ofFloat(waveStrength, target);
         releaseAnim.setDuration(target > 0f ? 165 : 260);
         if (target > 0f) releaseAnim.setInterpolator(new OvershootInterpolator(1.06f));
+        else releaseAnim.setInterpolator(new PathInterpolator(0.25f, 1.0f, 0.5f, 1.0f));
         releaseAnim.addUpdateListener(va -> {
             waveStrength = (float) va.getAnimatedValue();
             if (waveStrength <= 0.01f && target == 0f) {

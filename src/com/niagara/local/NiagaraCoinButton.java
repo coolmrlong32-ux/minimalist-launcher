@@ -2,6 +2,7 @@ package com.niagara.local;
 
 import android.content.Context;
 import android.graphics.Canvas;
+import android.graphics.Color;
 import android.graphics.LinearGradient;
 import android.graphics.Paint;
 import android.graphics.Shader;
@@ -41,6 +42,8 @@ final class NiagaraCoinButton extends View {
     private float downX, downY;
     private boolean pressedState = false;
     private boolean gestureTriggered = false;
+    /** 搜索过渡进度 0..1：圆环随搜索呼出渐变为强调色并略微加粗，与壁纸景深/键盘升起同步。 */
+    private float searchProgress = 0f;
 
     private final Runnable longPressTask = new Runnable() {
         @Override
@@ -71,6 +74,13 @@ final class NiagaraCoinButton extends View {
         invalidate();
     }
 
+    void setSearchProgress(float progress) {
+        float p = Math.max(0f, Math.min(1f, progress));
+        if (Math.abs(p - searchProgress) < 0.002f) return;
+        searchProgress = p;
+        invalidate();
+    }
+
     void setIconMode(int mode) {
         if (this.iconMode != mode) {
             this.iconMode = mode;
@@ -93,8 +103,8 @@ final class NiagaraCoinButton extends View {
         bgPaint.setShader(new LinearGradient(0, 0, w, h, cols[0], cols[1], Shader.TileMode.CLAMP));
         canvas.drawCircle(cx, cy, r, bgPaint);
 
-        ringPaint.setStrokeWidth(1.0f * dp);
-        ringPaint.setColor(theme.coinButtonRingColor());
+        ringPaint.setStrokeWidth((1.0f + 0.8f * searchProgress) * dp);
+        ringPaint.setColor(blendColor(theme.coinButtonRingColor(), theme.accent, searchProgress));
         canvas.drawCircle(cx, cy, r - 0.5f * dp, ringPaint);
 
         if (iconMode == ICON_SEARCH) {
@@ -154,6 +164,16 @@ final class NiagaraCoinButton extends View {
         iconPaint.setAlpha(255);
         iconPaint.setColor(theme.textPrimary);
         canvas.drawRoundRect(fLeft, fTop, fLeft + cardW, fTop + cardH, corner, corner, iconPaint);
+    }
+
+    private static int blendColor(int from, int to, float t) {
+        if (t <= 0f) return from;
+        float u = Math.min(1f, t);
+        int a = Math.round(Color.alpha(from) + (Color.alpha(to) - Color.alpha(from)) * u);
+        int r = Math.round(Color.red(from) + (Color.red(to) - Color.red(from)) * u);
+        int g = Math.round(Color.green(from) + (Color.green(to) - Color.green(from)) * u);
+        int b = Math.round(Color.blue(from) + (Color.blue(to) - Color.blue(from)) * u);
+        return Color.argb(Math.max(a, Color.alpha(from)), r, g, b);
     }
 
     @Override

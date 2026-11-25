@@ -12,6 +12,7 @@ import android.text.TextUtils;
 import android.text.style.ForegroundColorSpan;
 import android.text.style.RelativeSizeSpan;
 import android.text.style.StyleSpan;
+import android.text.style.TypefaceSpan;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -28,7 +29,9 @@ import java.util.Locale;
  * - 彻底去除毛玻璃外框与生硬竖线，与上方大时钟、日期/农历自然左对齐；
  * - 默认精简模式：仅保留「天气图标 + 温度天气 · 高质感矢量电池 + 电量%」，清爽通透；
  * - 可在设置中切换为完整模式（追加电池温度与可用运存），点击电量区域直达 2x2 本机仪表盘；
- * - 电池图标重绘为圆润比例（22x11dp），正常态与主题文字同色协调，充电态高亮翡翠绿并叠加矢量闪电。
+ * - 电池图标重绘为圆润比例（22x11dp），正常态与主题文字同色协调，充电态高亮翡翠绿并叠加矢量闪电；
+ * - v2.6.0：彻底移除「·」字符分割线，改用 8dp 负空间间隙；次级文本降字号/降对比度（Medium 字重 + 半透明），
+ *   与上方大号 Light 时钟形成清晰的字重层次；支持 applySearchFadeProgress 随搜索进度渐隐淡出。
  */
 final class HeroStatusBarView extends LinearLayout {
 
@@ -45,12 +48,20 @@ final class HeroStatusBarView extends LinearLayout {
 
     private final WeatherGlyphView weatherIcon;
     private final TextView weatherLabel;
-    private final TextView dotSep1;
+    private final View gap1;
     private final BatteryGlyphView batteryIcon;
     private final TextView batteryLabel;
-    private final TextView dotSep2;
+    private final View gap2;
     private final TextView extraLabel;
 
+    /** 默认：无分割线留白排版（次级文本半透明、Medium 字重）。 */
+    static final int STYLE_AIRY = 0;
+    /** 高对比度排版：次级文本接近全不透明、粗体强调。 */
+    static final int STYLE_HIGH_CONTRAST = 1;
+    private static final float GAP_DP = 8f;
+
+    private int aestheticStyle = STYLE_AIRY;
+    private String lastWeatherRaw = "";
     private boolean fullMode = false;
     private int lastBatteryPct = 80;
     private boolean lastCharging = false;
@@ -77,12 +88,12 @@ final class HeroStatusBarView extends LinearLayout {
         wiLp.rightMargin = dp(5);
         weatherSeg.addView(weatherIcon, wiLp);
 
-        weatherLabel = makeLabel(13.2f);
+        weatherLabel = makeLabel(12.6f);
         weatherSeg.addView(weatherLabel, new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         addView(weatherSeg, new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(28)));
 
-        dotSep1 = makeDotSeparator();
-        addView(dotSep1);
+        gap1 = makeGap();
+        addView(gap1, new LayoutParams(dp(GAP_DP), 1));
 
         // 2. 电量交互段（点击打开 2x2 本机实时状态仪表盘）
         LinearLayout batterySeg = makeSegment(cb != null ? cb::onDeviceStatusClick : null, cb != null ? cb::onLongPress : null);
@@ -91,23 +102,55 @@ final class HeroStatusBarView extends LinearLayout {
         biLp.rightMargin = dp(5);
         batterySeg.addView(batteryIcon, biLp);
 
-        batteryLabel = makeLabel(13.2f);
+        batteryLabel = makeLabel(12.6f);
         batterySeg.addView(batteryLabel, new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         addView(batterySeg, new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(28)));
 
         // 3. 可选扩展段（完整模式：温度 · 可用运存）
-        dotSep2 = makeDotSeparator();
-        addView(dotSep2);
+        gap2 = makeGap();
+        addView(gap2, new LayoutParams(dp(GAP_DP), 1));
 
         LinearLayout extraSeg = makeSegment(cb != null ? cb::onDeviceStatusClick : null, cb != null ? cb::onLongPress : null);
-        extraLabel = makeLabel(12.2f);
-        extraLabel.setTextColor(theme.isLight ? 0x9E141824 : 0xB8E2E8F0);
+        extraLabel = makeLabel(12.0f);
         extraSeg.addView(extraLabel, new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         addView(extraSeg, new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(28)));
 
         applyExtraVisibility();
+        applyLabelColors();
         updateWeather("");
         updateMetrics(80, false, 32.0f, 4.0);
+    }
+
+    /** 切换极简留白排版（STYLE_AIRY）/ 高对比度排版（STYLE_HIGH_CONTRAST）。 */
+    void setAestheticStyle(int styleMode) {
+        int m = styleMode == STYLE_HIGH_CONTRAST ? STYLE_HIGH_CONTRAST : STYLE_AIRY;
+        if (m == aestheticStyle) return;
+        aestheticStyle = m;
+        applyLabelColors();
+        updateWeather(lastWeatherRaw);
+        renderMetricsText();
+    }
+
+    /** 随搜索框拉起平滑淡出：alpha = 1 - progress；完全淡出后置为 INVISIBLE（保持布局不跳动并禁用点击）。 */
+    void applySearchFadeProgress(float progress) {
+        float p = Math.max(0f, Math.min(1f, progress));
+        setAlpha(1f - p);
+        setTranslationY(-6f * dp * p);
+        int vis = p >= 0.999f ? View.INVISIBLE : View.VISIBLE;
+        if (getVisibility() != vis) setVisibility(vis);
+    }
+
+    private void applyLabelColors() {
+        boolean hc = aestheticStyle == STYLE_HIGH_CONTRAST;
+        int primary = theme.isLight ? (hc ? 0xE6141824 : 0xB8141824) : (hc ? 0xF2F8FAFC : 0xCCF1F5F9);
+        int secondary = theme.isLight ? (hc ? 0xB8141824 : 0x8C141824) : (hc ? 0xD9E2E8F0 : 0x9EE2E8F0);
+        weatherLabel.setTextColor(primary);
+        batteryLabel.setTextColor(primary);
+        extraLabel.setTextColor(secondary);
+    }
+
+    private Object weightSpan() {
+        return aestheticStyle == STYLE_HIGH_CONTRAST ? new StyleSpan(Typeface.BOLD) : new TypefaceSpan("sans-serif-medium");
     }
 
     void setFullMode(boolean full) {
@@ -119,7 +162,7 @@ final class HeroStatusBarView extends LinearLayout {
 
     private void applyExtraVisibility() {
         int vis = fullMode ? View.VISIBLE : View.GONE;
-        dotSep2.setVisibility(vis);
+        gap2.setVisibility(vis);
         ((View) extraLabel.getParent()).setVisibility(vis);
     }
 
@@ -155,21 +198,16 @@ final class HeroStatusBarView extends LinearLayout {
         return seg;
     }
 
-    private TextView makeDotSeparator() {
-        TextView dot = new TextView(getContext());
-        dot.setText("·");
-        dot.setTextColor(theme.isLight ? 0x55141824 : 0x66FFFFFF);
-        dot.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.0f * textScale);
-        dot.setTypeface(Typeface.create(typeface, Typeface.BOLD));
-        dot.setIncludeFontPadding(false);
-        dot.setPadding(dp(7), 0, dp(7), 0);
-        return dot;
+    /** 负空间间隙：取代原「·」字符分割线。 */
+    private View makeGap() {
+        return new View(getContext());
     }
 
     private TextView makeLabel(float spSize) {
         TextView tv = new TextView(getContext());
-        tv.setTextColor(theme.isLight ? 0xCC141824 : 0xE6F8FAFC);
-        tv.setTypeface(typeface);
+        tv.setTextColor(theme.isLight ? 0xB8141824 : 0xCCF1F5F9);
+        tv.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        tv.setLetterSpacing(0.015f);
         tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, spSize * textScale);
         tv.setFontFeatureSettings("tnum");
         tv.setSingleLine(true);
@@ -180,6 +218,7 @@ final class HeroStatusBarView extends LinearLayout {
     }
 
     void updateWeather(String rawSummary) {
+        lastWeatherRaw = rawSummary == null ? "" : rawSummary;
         int hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
         boolean isDay = (hour >= 6 && hour < 18);
 
@@ -210,13 +249,13 @@ final class HeroStatusBarView extends LinearLayout {
         int spIdx = cleaned.indexOf(' ');
         if (spIdx > 0 && spIdx < cleaned.length() - 1) {
             SpannableStringBuilder sb = new SpannableStringBuilder(cleaned);
-            sb.setSpan(new StyleSpan(Typeface.BOLD), 0, spIdx, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            sb.setSpan(new ForegroundColorSpan(theme.isLight ? 0x99141824 : 0xB8E2E8F0), spIdx, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            sb.setSpan(weightSpan(), 0, spIdx, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            sb.setSpan(new ForegroundColorSpan(theme.isLight ? 0x8C141824 : 0x9EE2E8F0), spIdx, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             sb.setSpan(new RelativeSizeSpan(0.93f), spIdx, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             weatherLabel.setText(sb);
         } else {
             SpannableStringBuilder sb = new SpannableStringBuilder(cleaned);
-            sb.setSpan(new StyleSpan(Typeface.BOLD), 0, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            sb.setSpan(weightSpan(), 0, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             weatherLabel.setText(sb);
         }
     }
@@ -233,7 +272,7 @@ final class HeroStatusBarView extends LinearLayout {
     private void renderMetricsText() {
         String pctPart = String.format(Locale.ROOT, "%d%%", lastBatteryPct);
         SpannableStringBuilder bSb = new SpannableStringBuilder(pctPart);
-        bSb.setSpan(new StyleSpan(Typeface.BOLD), 0, pctPart.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        bSb.setSpan(weightSpan(), 0, pctPart.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         if (lastCharging) {
             bSb.setSpan(new ForegroundColorSpan(theme.isLight ? 0xFF059669 : 0xFF34D399),
                     0, pctPart.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
@@ -243,7 +282,7 @@ final class HeroStatusBarView extends LinearLayout {
         batteryLabel.setText(bSb);
 
         if (fullMode) {
-            extraLabel.setText(String.format(Locale.ROOT, "%.1f° · %.1fG", lastBatteryTempC, lastRamAvailGb));
+            extraLabel.setText(String.format(Locale.ROOT, "%.1f°  %.1fG", lastBatteryTempC, lastRamAvailGb));
         }
     }
 

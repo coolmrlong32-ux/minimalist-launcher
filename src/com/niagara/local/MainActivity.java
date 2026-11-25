@@ -2,8 +2,9 @@ package com.niagara.local;
 
 import android.Manifest;
 import android.app.Activity;
-import android.app.ActivityOptions;
+import android.animation.ValueAnimator;import android.app.ActivityOptions;
 import android.app.AlertDialog;
+import android.app.Notification;
 import android.app.Dialog;
 import android.app.KeyguardManager;
 import android.app.PendingIntent;
@@ -70,9 +71,11 @@ import android.view.HapticFeedbackConstants;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
+import android.view.animation.PathInterpolator;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.AbsListView;
@@ -536,6 +539,7 @@ public class MainActivity extends Activity {
     protected void onPause() {
         super.onPause();
         isResumed = false;
+        dismissAppPopupCard(false);
         uiHandler.removeCallbacks(resumeRefreshTask);
         lastPauseUptime = SystemClock.uptimeMillis();
         PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
@@ -621,6 +625,7 @@ public class MainActivity extends Activity {
     // ---------- 构建 Niagara 主界面（还原视频清爽头部 + 深度优化第一页常用应用栏） ----------
     private View buildNiagaraWorkspace() {
         final FrameLayout root = new FrameLayout(this);
+        workspaceRoot = root;
 
         // 1. 底层：跟随系统白昼/暗夜变化的柔光流体/壁纸画布
         backdropView = new AuroraBackdropView(this);
@@ -642,7 +647,7 @@ public class MainActivity extends Activity {
         mainClock.setFormat24Hour(timeFmt);
         mainClock.setFormat12Hour(timeFmt);
         mainClock.setTextColor(theme.textPrimary);
-        mainClock.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp(68));
+        mainClock.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp(HERO_CLOCK_SP));
         mainClock.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
         mainClock.setLetterSpacing(0.01f);
         mainClock.setFontFeatureSettings("tnum");
@@ -660,11 +665,12 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         dateLunarView = new TextView(this);
-        dateLunarView.setTextColor(theme.isLight ? 0xB8141824 : 0xCCF1F5F9);
+        // v2.6.0 字重对比：日期 Medium 14sp、alpha 0.85；农历为 Regular 更淡的次级层级
+        dateLunarView.setTextColor(theme.isLight ? 0xD9141824 : 0xD9F1F5F9);
         dateLunarView.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp(14.0f));
-        dateLunarView.setTypeface(typeface);
+        dateLunarView.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         dateLunarView.setLetterSpacing(0.02f);
-        dateLunarView.setPadding(dp(2), dp(4), 0, 0);
+        dateLunarView.setPadding(dp(2), dp(6), 0, 0);
         dateLunarView.setShadowLayer(theme.isLight ? dp(1.0f) : dp(2.0f), 0f, dp(0.6f), theme.isLight ? 0x14000000 : 0x44000000);
         dateLunarView.setOnClickListener(v -> {
             if (searchActive || inAllAppsMode) {
@@ -881,7 +887,10 @@ public class MainActivity extends Activity {
                 }
             }
             @Override
-            public void onScroll(AbsListView view, int firstVisibleItem, int visibleItemCount, int totalItemCount) {}
+            public void onScroll(AbsListView view, int firstVisibleItem, int visibleItemCount, int totalItemCount) {
+                // 波浪擦拭期间列表被程序化跳转/重排后，立即对新的可见项重新施加内推位移，避免残留或错位
+                if (waveCouplingActive) applyWaveDisplacementToVisibleItems();
+            }
         });
 
         LinearLayout.LayoutParams listLp = new LinearLayout.LayoutParams(
@@ -962,6 +971,7 @@ public class MainActivity extends Activity {
             }
         };
         rightWaveBar.setListener(waveListener);
+        setupWaveListCoupling();
 
         root.addView(rightWaveBar, new FrameLayout.LayoutParams(
                 dp(210), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END));
@@ -1071,6 +1081,148 @@ public class MainActivity extends Activity {
         hideSoftKeyboard();
     }
 
+    // ---------- v2.6.0 边缘波浪导轨 ↔ 主列表物理联动 ----------
+    private static final float WAVE_LIST_SIGMA_DP = 72f;          // 列表高斯σ
+    private static final float WAVE_LIST_PUSH_DP = 36f;           // 列表项最大横向内推
+    private static final float WAVE_LIST_ICON_PARALLAX_DP = 12f;  // 图标额外视差
+    private static final float WAVE_LIST_SCALE_GAIN = 0.04f;      // 微缩放增益
+    private static final long WAVE_REBOUND_MS = 180L;             // 松手阻尼回弹时长
+
+    private boolean waveCouplingActive = false;
+    private float waveCouplingTouchY = -1f;
+    private float waveCouplingDir = -1f;   // -1：向屏幕左侧（右手导轨内侧）推；+1：左手导轨向右推
+    private ValueAnimator waveReboundAnim;
+    private final int[] waveListLoc = new int[2];
+
+    private void setupWaveListCoupling() {
+        if (rightWaveBar == null) return;
+        rightWaveBar.setOnWaveScrubListener(new NiagaraWaveView.OnWaveScrubListener() {
+            @Override
+            public void onWaveScrubStart() {
+                cancelWaveRebound();
+                waveCouplingActive = true;
+                waveCouplingDir = rightWaveBar.isScrubFromLeft() ? 1f : -1f;
+            }
+
+            @Override
+            public void onWaveScrub(char currentLetter, float progress, float touchScreenY) {
+                if (!waveCouplingActive) return;
+                waveCouplingTouchY = touchScreenY;
+                applyWaveDisplacementToVisibleItems();
+            }
+
+            @Override
+            public void onWaveScrubEnd() {
+                waveCouplingActive = false;
+                waveCouplingTouchY = -1f;
+                resetVisibleItemsDisplacement();
+            }
+        });
+    }
+
+    /** 仅遍历屏幕内可见项；只改 translationX / scale（GPU 合成层属性），绝不触发 requestLayout。 */
+    private void applyWaveDisplacementToVisibleItems() {
+        if (streamListView == null || waveCouplingTouchY < 0f) return;
+        streamListView.getLocationOnScreen(waveListLoc);
+        float sigma = WAVE_LIST_SIGMA_DP * dpUnit;
+        int count = streamListView.getChildCount();
+        for (int i = 0; i < count; i++) {
+            View child = streamListView.getChildAt(i);
+            if (child == null) continue;
+            float centerY = waveListLoc[1] + child.getTop() + child.getHeight() * 0.5f;
+            float d = centerY - waveCouplingTouchY;
+            float factor = (float) Math.exp(-(d * d) / (2.0f * sigma * sigma));
+            applyItemWaveDisplacement(child, factor);
+        }
+    }
+
+    private void applyItemWaveDisplacement(View itemView, float factor) {
+        float f = Math.max(0f, Math.min(1f, factor));
+        itemView.setTranslationX(waveCouplingDir * dpUnit * WAVE_LIST_PUSH_DP * f);
+        float scale = 1.0f + WAVE_LIST_SCALE_GAIN * f;
+        itemView.setScaleX(scale);
+        itemView.setScaleY(scale);
+        View icon = findRowIconView(itemView);
+        if (icon != null) {
+            icon.setTranslationX(waveCouplingDir * dpUnit * WAVE_LIST_ICON_PARALLAX_DP * f);
+        }
+    }
+
+    private View findRowIconView(View itemView) {
+        if ("app_row_v2".equals(itemView.getTag()) && itemView instanceof ViewGroup) {
+            View card = ((ViewGroup) itemView).getChildAt(0);
+            if (card instanceof ViewGroup && ((ViewGroup) card).getChildCount() > 1) {
+                View icon = ((ViewGroup) card).getChildAt(1);
+                if (icon instanceof ImageView) return icon;
+            }
+        }
+        return null;
+    }
+
+    private void resetItemWaveTransform(View itemView) {
+        if (itemView.getTranslationX() != 0f) itemView.setTranslationX(0f);
+        if (itemView.getScaleX() != 1f) itemView.setScaleX(1f);
+        if (itemView.getScaleY() != 1f) itemView.setScaleY(1f);
+        View icon = findRowIconView(itemView);
+        if (icon != null && icon.getTranslationX() != 0f) icon.setTranslationX(0f);
+    }
+
+    private void cancelWaveRebound() {
+        if (waveReboundAnim != null) {
+            ValueAnimator a = waveReboundAnim;
+            waveReboundAnim = null;
+            a.cancel();
+        }
+    }
+
+    /** 松手后：对已偏移的可见项在 180ms 内以贝塞尔阻尼曲线回弹至 translationX=0 / scale=1。 */
+    private void resetVisibleItemsDisplacement() {
+        cancelWaveRebound();
+        if (streamListView == null) return;
+        int count = streamListView.getChildCount();
+        final List<View> views = new ArrayList<>();
+        final List<float[]> from = new ArrayList<>(); // {itemTx, itemScale, iconTx}
+        for (int i = 0; i < count; i++) {
+            View child = streamListView.getChildAt(i);
+            if (child == null) continue;
+            View icon = findRowIconView(child);
+            float tx = child.getTranslationX();
+            float sc = child.getScaleX();
+            float itx = icon != null ? icon.getTranslationX() : 0f;
+            if (tx == 0f && sc == 1f && itx == 0f) continue;
+            views.add(child);
+            from.add(new float[]{tx, sc, itx});
+        }
+        if (views.isEmpty()) return;
+
+        final ValueAnimator anim = ValueAnimator.ofFloat(1f, 0f);
+        anim.setDuration(WAVE_REBOUND_MS);
+        anim.setInterpolator(new PathInterpolator(0.25f, 1.0f, 0.5f, 1.0f));
+        anim.addUpdateListener(va -> {
+            float v = (float) va.getAnimatedValue();
+            for (int i = 0; i < views.size(); i++) {
+                View child = views.get(i);
+                float[] f = from.get(i);
+                child.setTranslationX(f[0] * v);
+                float s = 1f + (f[1] - 1f) * v;
+                child.setScaleX(s);
+                child.setScaleY(s);
+                View icon = findRowIconView(child);
+                if (icon != null) icon.setTranslationX(f[2] * v);
+            }
+        });
+        anim.addListener(new android.animation.AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(android.animation.Animator animation) {
+                if (waveReboundAnim != anim) return; // 被新一轮擦拭取消：保持当前位移，由新位移接管
+                waveReboundAnim = null;
+                for (View child : views) resetItemWaveTransform(child);
+            }
+        });
+        waveReboundAnim = anim;
+        anim.start();
+    }
+
     private Integer findNearestLetterPosition(int idx) {
         for (int i = idx; i < WAVE_SYMBOLS.length(); i++) {
             Integer p = letterRowIndex.get(WAVE_SYMBOLS.charAt(i));
@@ -1145,6 +1297,11 @@ public class MainActivity extends Activity {
         int topPad = dp(8);
         if (extraSpace > dp(36)) {
             topPad = Math.max(dp(8), Math.min(Math.round(extraSpace * 0.62f), availH / 2));
+            // v2.6.0 首屏留白美学：时钟下方保留至少 18% 屏高的纯净留白，随时钟高度联动，且不超过剩余空间
+            int clockH = mainClockView != null ? mainClockView.getHeight() : 0;
+            int skyMin = Math.max(Math.round(getResources().getDisplayMetrics().heightPixels * 0.18f),
+                    Math.round(clockH * 1.2f));
+            topPad = Math.max(topPad, Math.min(skyMin, Math.min(extraSpace, availH / 2)));
         }
         if (streamListView.getPaddingTop() != topPad || streamListView.getPaddingBottom() != botPad) {
             streamListView.setPadding(left, topPad, right, botPad);
@@ -1197,7 +1354,63 @@ public class MainActivity extends Activity {
         });
     }
 
+    // ---------- v2.6.0 灵动搜索过渡：壁纸景深 / Hero 渐隐 / 圆钮同步 ----------
+    private static final float HERO_CLOCK_SP = 44f;
+    private static final long SEARCH_TRANSITION_MS = 220L;
+    private float searchTransitionProgress = 0f;
+    private boolean searchTransitionTargetOn = false;
+    private ValueAnimator searchTransitionAnim;
+
+    /**
+     * 驱动搜索过渡进度（0=首屏，1=完全搜索态）：
+     * 壁纸缩放 1.0→0.96 + 35% 压暗、Hero 时钟/日期/状态栏上滑淡出（-30dp）、搜索卡从下方浮入、圆钮圆环强调。
+     */
+    public void updateSearchTransition(float progress) {
+        float p = Math.max(0f, Math.min(1f, progress));
+        searchTransitionProgress = p;
+        if (backdropView != null) backdropView.setSearchTransitionProgress(p);
+        if (heroStatusBar != null) heroStatusBar.applySearchFadeProgress(p);
+        int heroVis = p >= 0.999f ? View.INVISIBLE : View.VISIBLE;
+        if (mainClockView != null) {
+            mainClockView.setAlpha(1f - p);
+            mainClockView.setTranslationY(-dp(30) * p);
+            if (mainClockView.getVisibility() != heroVis) mainClockView.setVisibility(heroVis);
+        }
+        if (dateLunarView != null) {
+            dateLunarView.setAlpha(1f - p);
+            dateLunarView.setTranslationY(-dp(24) * p);
+            if (dateLunarView.getVisibility() != heroVis) dateLunarView.setVisibility(heroVis);
+        }
+        if (searchBarCard != null) {
+            if (searchBarCard.getVisibility() == View.VISIBLE) {
+                searchBarCard.setAlpha(p);
+                searchBarCard.setTranslationY((1f - p) * dp(18));
+            } else {
+                searchBarCard.setAlpha(1f);
+                searchBarCard.setTranslationY(0f);
+            }
+        }
+        if (coinButton != null) coinButton.setSearchProgress(p);
+    }
+
+    private void animateSearchTransition(boolean on) {
+        if (on == searchTransitionTargetOn) return;
+        searchTransitionTargetOn = on;
+        if (searchTransitionAnim != null) {
+            searchTransitionAnim.cancel();
+            searchTransitionAnim = null;
+        }
+        updateSearchTransition(searchTransitionProgress);
+        ValueAnimator anim = ValueAnimator.ofFloat(searchTransitionProgress, on ? 1f : 0f);
+        anim.setDuration(SEARCH_TRANSITION_MS);
+        anim.setInterpolator(new PathInterpolator(0.25f, 0.1f, 0.25f, 1.0f));
+        anim.addUpdateListener(va -> updateSearchTransition((float) va.getAnimatedValue()));
+        searchTransitionAnim = anim;
+        anim.start();
+    }
+
     private void updateFirstPageExtrasVisibility() {
+        animateSearchTransition(searchActive);
         if (firstPageExtrasBox != null) {
             firstPageExtrasBox.setVisibility(View.GONE);
         }
@@ -1412,6 +1625,7 @@ public class MainActivity extends Activity {
     }
 
     private void returnToHomeFavorites() {
+        dismissAppPopupCard(false);
         if (currentSheetDialog != null && currentSheetDialog.isShowing()) currentSheetDialog.dismiss();
         cooldownWaveBars();
         boolean needRebuild = searchActive || inAllAppsMode;
@@ -1438,7 +1652,16 @@ public class MainActivity extends Activity {
             java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("M月d日 EEE", Locale.CHINESE);
             String dateStr = sdf.format(new java.util.Date());
             String lunar = (dm.lunarLine != null && !dm.lunarLine.isEmpty()) ? dm.lunarLine : "清风徐来";
-            dateLunarView.setText(dateStr + " · " + lunar);
+            // 去除「·」分割符：以自然字距区隔，农历降为次级字重/透明度
+            android.text.SpannableStringBuilder dsb = new android.text.SpannableStringBuilder(dateStr);
+            dsb.append("   ");
+            int lunarStart = dsb.length();
+            dsb.append(lunar);
+            dsb.setSpan(new android.text.style.TypefaceSpan("sans-serif"), lunarStart, dsb.length(),
+                    android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            dsb.setSpan(new android.text.style.ForegroundColorSpan(theme.isLight ? 0x99141824 : 0x99F1F5F9),
+                    lunarStart, dsb.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            dateLunarView.setText(dsb);
         }
         if (heroStatusBar != null) {
             heroStatusBar.updateMetrics(dm.batteryPct, dm.charging, dm.batteryTempC, dm.ramAvailGb);
@@ -2079,8 +2302,13 @@ public class MainActivity extends Activity {
 
     @Override
     public boolean dispatchTouchEvent(MotionEvent ev) {
+        // Pop-up 浮层展示期间：事件交由浮层自身（空白处点击即关闭），不再触发列表手势
+        if (appPopupScrim != null) {
+            return super.dispatchTouchEvent(ev);
+        }
         int action = ev.getActionMasked();
         if (action == MotionEvent.ACTION_DOWN) {
+            rightRowSwiping = false;
             long nowDown = SystemClock.uptimeMillis();
             if (nowDown - lastTapDownTime < 340) {
                 // 🚀 连续点击（双击）进行中，第一时间取消第一次点击可能预约的应用启动，防止误开应用
@@ -2136,9 +2364,14 @@ public class MainActivity extends Activity {
                 }
             }
         } else if (swipedRowPos >= 0) {
+            // 🚀 v2.6.0 右滑直达 Pop-up：touchSlop + 极角隔离（dx > slop && dx > |dy|*2），优先于左滑逻辑判定
+            AppEntry swipeApp = swipedRowPos < streamRows.size() ? streamRows.get(swipedRowPos).app : null;
+            if (!(rowSwiping && !rightRowSwiping) && handleItemSwipeRight(swipedRowView, swipeApp, ev)) {
+                return true;
+            }
             float dx = ev.getRawX() - touchStartX;
             float dy = ev.getRawY() - touchStartY;
-            if (!rowSwiping && action == MotionEvent.ACTION_MOVE && Math.abs(dx) > dp(20) && Math.abs(dx) > Math.abs(dy) * 2.0f) {
+            if (!rowSwiping && action == MotionEvent.ACTION_MOVE && -dx > dp(20) && -dx > Math.abs(dy) * 2.0f) {
                 rowSwiping = true;
                 MotionEvent cancel = MotionEvent.obtain(ev);
                 cancel.setAction(MotionEvent.ACTION_CANCEL);
@@ -2149,32 +2382,28 @@ public class MainActivity extends Activity {
             if (rowSwiping) {
                 if (action == MotionEvent.ACTION_MOVE) {
                     if (swipedRowView != null) {
-                        float clamped = Math.max(-dp(110), Math.min(dp(140), dx)) * 0.68f;
+                        float clamped = Math.max(-dp(110), Math.min(0f, dx)) * 0.68f;
                         swipedRowView.setTranslationX(clamped);
                     }
                     if (swipeHintPill != null && swipedRowPos < streamRows.size()) {
                         AppEntry targetApp = streamRows.get(swipedRowPos).app;
-                        if (targetApp != null && Math.abs(dx) > dp(24)) {
-                            if (dx > 0) {
-                                swipeHintPill.setText("⚙  详情 · 通知 · 快捷方式");
-                            } else {
-                                String pkg = targetApp.component.getPackageName();
-                                List<NotificationHubService.NotifItem> nl = NotificationHubService.allByPkg.get(pkg);
-                                boolean hasClearable = false;
-                                if (nl != null) {
-                                    for (NotificationHubService.NotifItem ni : nl) {
-                                        if (ni.isClearable) { hasClearable = true; break; }
-                                    }
-                                }
-                                if (hasClearable) {
-                                    swipeHintPill.setText("✕  清除该应用通知");
-                                } else {
-                                    boolean isFav = getStringList(K_FAVS).contains(targetApp.idKey);
-                                    swipeHintPill.setText(isFav ? "★  移出常用应用" : "☆  加入常用应用");
+                        if (targetApp != null && -dx > dp(24)) {
+                            String pkg = targetApp.component.getPackageName();
+                            List<NotificationHubService.NotifItem> nl = NotificationHubService.allByPkg.get(pkg);
+                            boolean hasClearable = false;
+                            if (nl != null) {
+                                for (NotificationHubService.NotifItem ni : nl) {
+                                    if (ni.isClearable) { hasClearable = true; break; }
                                 }
                             }
+                            if (hasClearable) {
+                                swipeHintPill.setText("✕  清除该应用通知");
+                            } else {
+                                boolean isFav = getStringList(K_FAVS).contains(targetApp.idKey);
+                                swipeHintPill.setText(isFav ? "★  移出常用应用" : "☆  加入常用应用");
+                            }
                             swipeHintPill.setVisibility(View.VISIBLE);
-                            swipeHintPill.setAlpha(Math.min(1f, (Math.abs(dx) - dp(20)) / dp(48)));
+                            swipeHintPill.setAlpha(Math.min(1f, (-dx - dp(20)) / dp(48)));
                         }
                     }
                 } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
@@ -2186,19 +2415,14 @@ public class MainActivity extends Activity {
                     }
                     if (action == MotionEvent.ACTION_UP && swipedRowPos < streamRows.size()) {
                         AppEntry targetApp = streamRows.get(swipedRowPos).app;
-                        if (targetApp != null) {
-                            if (dx > dp(68)) {
-                                getWindow().getDecorView().performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK);
-                                showAppActionSheet(targetApp);
-                            } else if (dx < -dp(68) && targetApp != virtualSettingsApp) {
-                                getWindow().getDecorView().performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
-                                String pkg = targetApp.component.getPackageName();
-                                int cleared = NotificationHubService.cancelAllForPackage(pkg);
-                                if (cleared > 0) {
-                                    Toast.makeText(this, "已清除「" + targetApp.label + "」" + cleared + " 条通知", Toast.LENGTH_SHORT).show();
-                                } else {
-                                    toggleFavoriteQuickly(targetApp);
-                                }
+                        if (targetApp != null && dx < -dp(68) && targetApp != virtualSettingsApp) {
+                            getWindow().getDecorView().performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
+                            String pkg = targetApp.component.getPackageName();
+                            int cleared = NotificationHubService.cancelAllForPackage(pkg);
+                            if (cleared > 0) {
+                                Toast.makeText(this, "已清除「" + targetApp.label + "」" + cleared + " 条通知", Toast.LENGTH_SHORT).show();
+                            } else {
+                                toggleFavoriteQuickly(targetApp);
                             }
                         }
                     }
@@ -2210,6 +2434,481 @@ public class MainActivity extends Activity {
         }
         if (gestureDetector != null) gestureDetector.onTouchEvent(ev);
         return super.dispatchTouchEvent(ev);
+    }
+
+    // ---------- v2.6.0 单手右滑直达 Pop-up ----------
+    private boolean rightRowSwiping = false;
+    private int touchSlopPx = 0;
+
+    /**
+     * 列表项右滑手势识别：dx > touchSlop 且 dx > |dy|*2.0（极角隔离，避开纵向滚动与系统边缘手势）。
+     * 触发后接管事件流：列表项以 min(dx*0.4, 48dp) 跟手位移，松手 dx > 56dp 呼出 Pop-up，否则平滑复位。
+     *
+     * @return true 表示事件已被右滑手势消费（调用方应直接返回 true）
+     */
+    private boolean handleItemSwipeRight(View itemView, AppEntry appInfo, MotionEvent event) {
+        if (appInfo == null || itemView == null) return false;
+        int action = event.getActionMasked();
+        float dx = event.getRawX() - touchStartX;
+        float dy = event.getRawY() - touchStartY;
+
+        if (!rightRowSwiping) {
+            if (action != MotionEvent.ACTION_MOVE) return false;
+            if (touchSlopPx <= 0) touchSlopPx = ViewConfiguration.get(this).getScaledTouchSlop();
+            if (!(dx > touchSlopPx && dx > Math.abs(dy) * 2.0f)) return false;
+            rightRowSwiping = true;
+            rowSwiping = true;
+            if (streamListView != null) streamListView.requestDisallowInterceptTouchEvent(true);
+            MotionEvent cancel = MotionEvent.obtain(event);
+            cancel.setAction(MotionEvent.ACTION_CANCEL);
+            super.dispatchTouchEvent(cancel);
+            if (gestureDetector != null) gestureDetector.onTouchEvent(cancel);
+            cancel.recycle();
+        }
+
+        if (action == MotionEvent.ACTION_MOVE) {
+            itemView.setTranslationX(Math.max(0f, Math.min(dx * 0.4f, dp(48))));
+            if (swipeHintPill != null && dx > dp(16)) {
+                swipeHintPill.setText(dx > dp(56) ? "⚙  松手展开 · 通知 · 快捷方式" : "⚙  继续右滑展开");
+                swipeHintPill.setVisibility(View.VISIBLE);
+                swipeHintPill.setAlpha(Math.min(1f, (dx - dp(16)) / dp(40)));
+            }
+            return true;
+        }
+        if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+            itemView.animate().translationX(0f).setDuration(190).start();
+            if (swipeHintPill != null) swipeHintPill.setVisibility(View.GONE);
+            boolean trigger = action == MotionEvent.ACTION_UP && dx > dp(56);
+            rightRowSwiping = false;
+            rowSwiping = false;
+            swipedRowPos = -1;
+            if (trigger) {
+                getWindow().getDecorView().performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK);
+                showAppPopupCard(itemView, appInfo);
+            }
+            return true;
+        }
+        return true;
+    }
+
+    // ---------- v2.6.0 锚点跟随 Pop-up 浮层（通知摘要 / 快捷回复 / 动态快捷方式） ----------
+    private FrameLayout workspaceRoot;
+    private FrameLayout appPopupScrim;
+
+    private void dismissAppPopupCard(boolean animate) {
+        final FrameLayout scrim = appPopupScrim;
+        if (scrim == null) return;
+        appPopupScrim = null;
+        hideSoftKeyboard();
+        final Runnable remove = () -> {
+            ViewGroup p = (ViewGroup) scrim.getParent();
+            if (p != null) p.removeView(scrim);
+        };
+        if (animate) {
+            scrim.animate().alpha(0f).setDuration(120).withEndAction(remove).start();
+        } else {
+            scrim.animate().cancel();
+            remove.run();
+        }
+    }
+
+    private GradientDrawable popupCardBackground() {
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(theme.isLight ? 0xE6F4F5F7 : 0xE61A1C20);       // 微透明、无厚边框、无硬投影
+        g.setCornerRadius(dp(20));
+        g.setStroke(Math.max(1, Math.round(0.5f * dpUnit)), theme.isLight ? 0x66FFFFFF : 0x24FFFFFF); // 0.5dp 高光内轮廓
+        return g;
+    }
+
+    /** 在目标列表项旁弹出与其几何锚定的无边框微卡片：自动上翻避让底部，左缘对齐图标中心 +64dp，右侧留 16dp。 */
+    private void showAppPopupCard(final View anchorView, final AppEntry app) {
+        if (app == null || anchorView == null || workspaceRoot == null) return;
+        if (app == virtualSettingsApp) {
+            openControlCenterSheet();
+            return;
+        }
+        dismissAppPopupCard(false);
+        final FrameLayout root = workspaceRoot;
+        final String pkg = app.component != null ? app.component.getPackageName() : "";
+
+        final LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(14), dp(12), dp(14), dp(8));
+
+        // 1. 头部：图标 + 名称 + 打开
+        LinearLayout hdr = new LinearLayout(this);
+        hdr.setGravity(Gravity.CENTER_VERTICAL);
+        ImageView hIcon = new ImageView(this);
+        hIcon.setImageDrawable(getShapedIcon(app));
+        LinearLayout.LayoutParams hiLp = new LinearLayout.LayoutParams(dp(30), dp(30));
+        hiLp.rightMargin = dp(10);
+        hdr.addView(hIcon, hiLp);
+        TextView hTitle = makeText(app.label, 15.5f, theme.textPrimary, true);
+        hTitle.setSingleLine(true);
+        hTitle.setEllipsize(TextUtils.TruncateAt.END);
+        hdr.addView(hTitle, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        hdr.addView(makeText("打开 ›", 12.5f, theme.accent, true));
+        hdr.setPadding(0, 0, 0, dp(4));
+        hdr.setOnClickListener(v -> {
+            dismissAppPopupCard(true);
+            launchApp(app);
+        });
+        content.addView(hdr);
+
+        // 2. 未读通知摘要（至多 3 条）：右滑 / ✕ 清除，支持内联快捷回复与常规动作胶囊
+        final List<NotificationHubService.NotifItem> notifs = NotificationHubService.getAllByPackage(pkg);
+        if (!notifs.isEmpty()) {
+            LinearLayout nHdr = new LinearLayout(this);
+            nHdr.setGravity(Gravity.CENTER_VERTICAL);
+            TextView nTitle = makeText("💬 未读通知 " + notifs.size(), 11.8f, theme.accent, true);
+            nTitle.setPadding(0, dp(10), 0, dp(4));
+            nHdr.addView(nTitle, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            TextView clearAll = makeText("全部清除", 11.5f, theme.textSecondary, true);
+            clearAll.setPadding(dp(8), dp(10), 0, dp(4));
+            clearAll.setOnClickListener(v -> {
+                int cleared = NotificationHubService.cancelAllForPackage(pkg);
+                Toast.makeText(this, cleared > 0 ? "已清除全部通知" : "没有可清除的通知", Toast.LENGTH_SHORT).show();
+                dismissAppPopupCard(true);
+            });
+            nHdr.addView(clearAll);
+            content.addView(nHdr);
+
+            int shown = 0;
+            for (NotificationHubService.NotifItem n : notifs) {
+                if (shown++ >= 3) break;
+                LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                rlp.topMargin = dp(5);
+                content.addView(buildPopupNotifRow(n), rlp);
+            }
+        }
+
+        // 3. 动态快捷方式（API 25+，SecurityException 安全降级）
+        final List<ShortcutInfo> shortcuts = queryPopupShortcuts(app);
+        if (!shortcuts.isEmpty()) {
+            TextView sTitle = makeText("⚡ 快捷方式", 11.8f, theme.accent, true);
+            sTitle.setPadding(0, dp(10), 0, dp(2));
+            content.addView(sTitle);
+            for (final ShortcutInfo sc : shortcuts) {
+                LinearLayout sRow = new LinearLayout(this);
+                sRow.setGravity(Gravity.CENTER_VERTICAL);
+                sRow.setPadding(0, dp(8), 0, dp(8));
+                Drawable sIcon = null;
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N_MR1 && launcherApps != null) {
+                        sIcon = launcherApps.getShortcutIconDrawable(sc, getResources().getDisplayMetrics().densityDpi);
+                    }
+                } catch (Throwable ignored) {}
+                if (sIcon != null) {
+                    ImageView siv = new ImageView(this);
+                    siv.setImageDrawable(sIcon);
+                    LinearLayout.LayoutParams silp = new LinearLayout.LayoutParams(dp(22), dp(22));
+                    silp.rightMargin = dp(10);
+                    sRow.addView(siv, silp);
+                }
+                TextView sLabel = makeText(String.valueOf(sc.getShortLabel()), 13.5f, theme.textPrimary, false);
+                sLabel.setSingleLine(true);
+                sLabel.setEllipsize(TextUtils.TruncateAt.END);
+                sRow.addView(sLabel, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+                sRow.setOnClickListener(v -> {
+                    dismissAppPopupCard(true);
+                    startPopupShortcut(sc, app);
+                });
+                content.addView(sRow);
+            }
+        }
+
+        // 4. 底部轻量操作
+        LinearLayout footer = new LinearLayout(this);
+        footer.setGravity(Gravity.CENTER_VERTICAL);
+        footer.setPadding(0, dp(8), 0, 0);
+        boolean isFav = getStringList(K_FAVS).contains(app.idKey);
+        TextView favBtn = makeText(isFav ? "★ 移出常用" : "☆ 加入常用", 12.5f, theme.textSecondary, true);
+        favBtn.setPadding(0, dp(6), dp(14), dp(6));
+        favBtn.setOnClickListener(v -> {
+            dismissAppPopupCard(true);
+            toggleFavoriteQuickly(app);
+        });
+        footer.addView(favBtn);
+        footer.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1f));
+        TextView moreBtn = makeText("⋯ 更多", 12.5f, theme.textSecondary, true);
+        moreBtn.setPadding(dp(14), dp(6), 0, dp(6));
+        moreBtn.setOnClickListener(v -> {
+            dismissAppPopupCard(false);
+            showAppActionSheet(app);
+        });
+        footer.addView(moreBtn);
+        content.addView(footer);
+
+        // 卡片容器：圆角裁剪 + 内容过高时可滚动
+        final ScrollView card = new ScrollView(this);
+        card.setVerticalScrollBarEnabled(false);
+        card.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        card.setBackground(popupCardBackground());
+        card.setClipToOutline(true);
+        card.setOutlineProvider(android.view.ViewOutlineProvider.BACKGROUND);
+        card.setClickable(true);
+        card.addView(content, new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        final FrameLayout scrim = new FrameLayout(this);
+        scrim.setBackgroundColor(theme.isLight ? 0x14000000 : 0x2A000000);
+        scrim.setClickable(true);
+        scrim.setOnClickListener(v -> dismissAppPopupCard(true));
+
+        // 几何锚定：横向左缘 = 图标中心 + 64dp，右侧距屏幕边缘 16dp；纵向对齐列表项，靠近底部自动上翻
+        int rootW = root.getWidth() > 0 ? root.getWidth() : getResources().getDisplayMetrics().widthPixels;
+        int rootH = root.getHeight() > 0 ? root.getHeight() : getResources().getDisplayMetrics().heightPixels;
+        int[] rootLoc = new int[2];
+        int[] aLoc = new int[2];
+        root.getLocationOnScreen(rootLoc);
+        anchorView.getLocationOnScreen(aLoc);
+        int anchorLeft = Math.round(aLoc[0] - anchorView.getTranslationX()) - rootLoc[0];
+        int anchorTop = aLoc[1] - rootLoc[1];
+        int anchorH = Math.max(anchorView.getHeight(), dp(40));
+        int iconCenterX = anchorLeft + dp(20);
+        View iconView = findRowIconView(anchorView);
+        if (iconView != null && iconView.getParent() instanceof View) {
+            iconCenterX = anchorLeft + ((View) iconView.getParent()).getLeft()
+                    + iconView.getLeft() + iconView.getWidth() / 2;
+        }
+
+        int minW = dp(236), maxW = dp(320), margin = dp(16);
+        int left = iconCenterX + dp(64);
+        if (rootW - left - margin < minW) left = rootW - margin - minW;
+        left = Math.max(dp(8), left);
+        int width = Math.max(minW, Math.min(maxW, rootW - left - margin));
+
+        int topInset = 0, botInset = 0;
+        try {
+            android.view.WindowInsets wi = root.getRootWindowInsets();
+            if (wi != null) {
+                topInset = wi.getSystemWindowInsetTop();
+                botInset = wi.getSystemWindowInsetBottom();
+            }
+        } catch (Throwable ignored) {}
+        int availTop = topInset + dp(8);
+        int availBottom = rootH - botInset - dp(12);
+        card.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(Math.max(dp(120), availBottom - availTop), View.MeasureSpec.AT_MOST));
+        int cardH = card.getMeasuredHeight();
+        int top = anchorTop - dp(6);
+        if (top + cardH > availBottom) {
+            top = anchorTop + anchorH + dp(6) - cardH; // 靠近底部：向上翻转展开
+        }
+        top = Math.max(availTop, Math.min(top, availBottom - cardH));
+
+        FrameLayout.LayoutParams clp = new FrameLayout.LayoutParams(width, cardH);
+        clp.leftMargin = left;
+        clp.topMargin = top;
+        scrim.addView(card, clp);
+        root.addView(scrim, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        appPopupScrim = scrim;
+
+        // 入场：从锚点左缘轻微内推 + 缩放 + 渐显
+        card.setPivotX(0f);
+        card.setPivotY(Math.max(0f, Math.min(cardH, anchorTop + anchorH * 0.5f - top)));
+        card.setScaleX(0.92f);
+        card.setScaleY(0.92f);
+        card.setTranslationX(-dp(12));
+        card.setAlpha(0f);
+        scrim.setAlpha(0f);
+        scrim.animate().alpha(1f).setDuration(150).start();
+        card.animate().alpha(1f).scaleX(1f).scaleY(1f).translationX(0f).setDuration(180)
+                .setInterpolator(new android.view.animation.DecelerateInterpolator(1.6f)).start();
+    }
+
+    /** 单条通知微卡片：标题/摘要/相对时间、✕ 与右滑清除、常规动作胶囊、内联快捷回复。 */
+    private View buildPopupNotifRow(final NotificationHubService.NotifItem n) {
+        final LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.VERTICAL);
+        row.setBackground(theme.subtleGhostPill(dpUnit, 14));
+        row.setPadding(dp(11), dp(8), dp(8), dp(8));
+
+        LinearLayout top = new LinearLayout(this);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        if (n.title != null && !n.title.isEmpty()) {
+            TextView t = makeText(n.title, 12.8f, theme.textPrimary, true);
+            t.setSingleLine(true);
+            t.setEllipsize(TextUtils.TruncateAt.END);
+            col.addView(t);
+        }
+        if (n.text != null && !n.text.isEmpty()) {
+            TextView t = makeText(n.text, 12.2f, theme.textPrimary, false);
+            t.setMaxLines(2);
+            t.setEllipsize(TextUtils.TruncateAt.END);
+            col.addView(t);
+        }
+        col.addView(makeText(NotificationHubService.formatRelativeTime(n.postTime), 10.6f, theme.textSecondary, false));
+        top.addView(col, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        if (n.isClearable) {
+            TextView x = makeText("✕", 13.5f, theme.textSecondary, true);
+            x.setPadding(dp(10), dp(4), dp(6), dp(4));
+            x.setOnClickListener(v -> dismissPopupNotifRow(row, n));
+            top.addView(x);
+        }
+        row.addView(top);
+
+        // 常规 Action 胶囊（标记已读 / 暂停 …）
+        if (n.plainActions != null && !n.plainActions.isEmpty()) {
+            LinearLayout caps = new LinearLayout(this);
+            caps.setPadding(0, dp(6), 0, 0);
+            for (final Notification.Action act : n.plainActions) {
+                TextView cap = makeText(String.valueOf(act.title), 11.6f, theme.accent, true);
+                cap.setBackground(theme.accentGlowPill(dpUnit, 12));
+                cap.setPadding(dp(10), dp(4), dp(10), dp(4));
+                cap.setSingleLine(true);
+                cap.setEllipsize(TextUtils.TruncateAt.END);
+                cap.setOnClickListener(v -> {
+                    try {
+                        act.actionIntent.send();
+                        Toast.makeText(this, "已执行：" + act.title, Toast.LENGTH_SHORT).show();
+                    } catch (Throwable t) {
+                        Toast.makeText(this, "操作已失效", Toast.LENGTH_SHORT).show();
+                    }
+                    dismissAppPopupCard(true);
+                });
+                LinearLayout.LayoutParams capLp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                capLp.rightMargin = dp(6);
+                caps.addView(cap, capLp);
+            }
+            row.addView(caps);
+        }
+
+        // 内联快捷回复（RemoteInput）
+        if (NotificationHubService.getQuickReplyAction(n) != null) {
+            LinearLayout replyRow = new LinearLayout(this);
+            replyRow.setGravity(Gravity.CENTER_VERTICAL);
+            replyRow.setPadding(0, dp(4), 0, 0);
+            final EditText replyIn = new EditText(this);
+            replyIn.setHint("直接回复…");
+            replyIn.setTextColor(theme.textPrimary);
+            replyIn.setHintTextColor((theme.textSecondary & 0x00FFFFFF) | 0x88000000);
+            replyIn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.8f);
+            replyIn.setSingleLine(true);
+            replyIn.setBackground(null);
+            replyIn.setPadding(0, dp(4), dp(6), dp(4));
+            replyRow.addView(replyIn, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            TextView send = makeText("发送", 12.5f, theme.accent, true);
+            send.setPadding(dp(8), dp(4), dp(6), dp(4));
+            send.setOnClickListener(v -> {
+                String msg = replyIn.getText().toString().trim();
+                if (msg.isEmpty()) return;
+                if (NotificationHubService.sendQuickReply(this, n, msg)) {
+                    Toast.makeText(this, "已发送回复", Toast.LENGTH_SHORT).show();
+                    dismissAppPopupCard(true);
+                } else {
+                    Toast.makeText(this, "回复失败，请进入应用回复", Toast.LENGTH_SHORT).show();
+                }
+            });
+            replyRow.addView(send);
+            row.addView(replyRow);
+        }
+
+        if (n.contentIntent != null) {
+            row.setOnClickListener(v -> {
+                try {
+                    launchedExternalApp = true;
+                    n.contentIntent.send();
+                    dismissAppPopupCard(true);
+                } catch (Throwable t) {
+                    launchedExternalApp = false;
+                }
+            });
+        }
+        if (n.isClearable) attachSwipeToDismiss(row, n);
+        return row;
+    }
+
+    private void dismissPopupNotifRow(final View row, NotificationHubService.NotifItem n) {
+        if (!NotificationHubService.dismissNotification(n.key)) {
+            Toast.makeText(this, "无法清除该通知", Toast.LENGTH_SHORT).show();
+            row.animate().translationX(0f).alpha(1f).setDuration(160).start();
+            return;
+        }
+        row.animate().translationX(row.getWidth()).alpha(0f).setDuration(160).withEndAction(() -> {
+            ViewGroup p = (ViewGroup) row.getParent();
+            if (p != null) p.removeView(row);
+        }).start();
+    }
+
+    /** 通知微条目右滑清除（同样使用 touchSlop + 极角隔离，避免与卡片纵向滚动冲突）。 */
+    private void attachSwipeToDismiss(final View row, final NotificationHubService.NotifItem n) {
+        final float[] down = new float[2];
+        final boolean[] swiping = new boolean[1];
+        row.setOnTouchListener((v, e) -> {
+            int a = e.getActionMasked();
+            if (a == MotionEvent.ACTION_DOWN) {
+                down[0] = e.getRawX();
+                down[1] = e.getRawY();
+                swiping[0] = false;
+                return false;
+            }
+            float dx = e.getRawX() - down[0];
+            float dy = e.getRawY() - down[1];
+            if (a == MotionEvent.ACTION_MOVE) {
+                if (!swiping[0]) {
+                    if (touchSlopPx <= 0) touchSlopPx = ViewConfiguration.get(this).getScaledTouchSlop();
+                    if (dx > touchSlopPx && dx > Math.abs(dy) * 2.0f) {
+                        swiping[0] = true;
+                        v.setPressed(false);
+                        v.cancelLongPress();
+                        if (v.getParent() != null) v.getParent().requestDisallowInterceptTouchEvent(true);
+                    }
+                }
+                if (swiping[0]) {
+                    v.setTranslationX(Math.max(0f, dx));
+                    v.setAlpha(1f - Math.min(0.6f, dx / dp(180)));
+                    return true;
+                }
+                return false;
+            }
+            if (a == MotionEvent.ACTION_UP || a == MotionEvent.ACTION_CANCEL) {
+                if (swiping[0]) {
+                    swiping[0] = false;
+                    if (a == MotionEvent.ACTION_UP && dx > dp(72)) {
+                        dismissPopupNotifRow(v, n);
+                    } else {
+                        v.animate().translationX(0f).alpha(1f).setDuration(160).start();
+                    }
+                    return true;
+                }
+            }
+            return false;
+        });
+    }
+
+    /** 弹层展示用快捷方式：仅启用项，按 rank 排序，至多 4 个。 */
+    private List<ShortcutInfo> queryPopupShortcuts(AppEntry app) {
+        List<ShortcutInfo> all = queryAppShortcuts(app);
+        List<ShortcutInfo> out = new ArrayList<>();
+        for (ShortcutInfo s : all) {
+            if (s != null && s.isEnabled() && s.getShortLabel() != null) out.add(s);
+        }
+        try {
+            Collections.sort(out, (a, b) -> Integer.compare(a.getRank(), b.getRank()));
+        } catch (Throwable ignored) {}
+        return out.size() > 4 ? new ArrayList<>(out.subList(0, 4)) : out;
+    }
+
+    private void startPopupShortcut(ShortcutInfo sc, AppEntry app) {
+        try {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N_MR1 || launcherApps == null) {
+                throw new IllegalStateException("shortcuts unsupported");
+            }
+            launchedExternalApp = true;
+            UserHandle uh = sc.getUserHandle() != null ? sc.getUserHandle()
+                    : (app.user != null ? app.user : Process.myUserHandle());
+            launcherApps.startShortcut(sc.getPackage(), sc.getId(), null, null, uh);
+        } catch (Throwable t) {
+            launchedExternalApp = false;
+            Toast.makeText(this, "无法打开该快捷方式", Toast.LENGTH_SHORT).show();
+        }
     }
 
     private void toggleFavoriteQuickly(AppEntry app) {
@@ -2941,6 +3640,9 @@ public class MainActivity extends Activity {
         @Override
         public View getView(int position, View convertView, ViewGroup parent) {
             StreamRow row = streamRows.get(position);
+            if (convertView != null && !waveCouplingActive && waveReboundAnim == null) {
+                resetItemWaveTransform(convertView);
+            }
 
             if (row.type == StreamRow.TYPE_CALC_RESULT) {
                 TextView tv = convertView instanceof TextView ? (TextView) convertView : new TextView(MainActivity.this);
@@ -5453,6 +6155,11 @@ public class MainActivity extends Activity {
     };
 
     private List<ShortcutInfo> queryAppShortcuts(AppEntry app) {
+        // API 25+ 才有 LauncherApps.getShortcuts；非默认桌面 / 权限收回时抛 SecurityException，统一降级为空列表
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N_MR1 || launcherApps == null
+                || app == null || app.component == null) {
+            return Collections.emptyList();
+        }
         try {
             if (!launcherApps.hasShortcutHostPermission()) return Collections.emptyList();
             LauncherApps.ShortcutQuery q = new LauncherApps.ShortcutQuery();
@@ -5461,25 +6168,17 @@ public class MainActivity extends Activity {
             q.setQueryFlags(LauncherApps.ShortcutQuery.FLAG_MATCH_DYNAMIC
                     | LauncherApps.ShortcutQuery.FLAG_MATCH_MANIFEST
                     | LauncherApps.ShortcutQuery.FLAG_MATCH_PINNED);
-            List<ShortcutInfo> res = launcherApps.getShortcuts(q, app.user);
+            List<ShortcutInfo> res = launcherApps.getShortcuts(q, app.user != null ? app.user : Process.myUserHandle());
             return res == null ? Collections.<ShortcutInfo>emptyList() : res;
+        } catch (SecurityException | NoSuchMethodError e) {
+            return Collections.emptyList();
         } catch (Throwable t) {
             return Collections.emptyList();
         }
     }
 
     private boolean dispatchDirectReply(NotificationHubService.NotifItem item, String text) {
-        try {
-            RemoteInput[] ris = item.quickReplyAction.getRemoteInputs();
-            Intent i = new Intent();
-            Bundle b = new Bundle();
-            for (RemoteInput r : ris) b.putCharSequence(r.getResultKey(), text);
-            RemoteInput.addResultsToIntent(ris, i, b);
-            item.quickReplyAction.actionIntent.send(this, 0, i);
-            return true;
-        } catch (Throwable t) {
-            return false;
-        }
+        return NotificationHubService.sendQuickReply(this, item, text);
     }
 
     private void promptRenameApp(final AppEntry app) {
@@ -5834,6 +6533,10 @@ public class MainActivity extends Activity {
     }
 
     private void handleBackAction() {
+        if (appPopupScrim != null) {
+            dismissAppPopupCard(true);
+            return;
+        }
         if (currentSheetDialog != null && currentSheetDialog.isShowing()) {
             currentSheetDialog.dismiss();
             return;

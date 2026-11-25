@@ -1,13 +1,18 @@
-﻿# 极简桌面 (Minimalist Launcher · v2.5.0)
+﻿# 极简桌面 (Minimalist Launcher · v2.6.0)
 
-一款追求极致流畅与单手人体工学的 Android 原生桌面启动器（Home App），零第三方臃肿库依赖，支持离线拼音/T9 检索、流体字母波浪导轨、内嵌通知胶囊、日出日落护眼壁纸与无障碍手势控制。
+一款追求极致流畅与单手人体工学的 Android 原生桌面启动器（Home App），零第三方臃肿库依赖，支持离线拼音/T9 检索、流体字母波浪导轨、单手右滑原生 Pop-up 浮层、内嵌通知胶囊、日出日落护眼壁纸与无障碍手势控制。
+
+## v2.6.0 新特性
+- **高斯正态波浪导轨与主列表横向位移联动**：`NiagaraWaveView` 采用平滑高斯正态分布包络算法与 180dp 触点动态系统手势排除区，配合 `CLOCK_TICK` 防抖微震与主列表项横向内推缩放联动，松手 180ms 阻尼回弹。
+- **单手右滑原生 Pop-up 浮层与快捷方式**：列表项基于 `TouchSlop` 与极角隔离判定单手右滑，原地展开锚点跟随的去边框微卡片，集成 `LauncherApps` 原生动态快捷方式、未读通知摘要、一键清除及 `RemoteInput` 内联快捷回复。
+- **首屏留白美学与搜索景深过渡**：`HeroStatusBarView` 去除冗余分割符并强化字体字重对比与呼吸感留白；唤起搜索时 `AuroraBackdropView` 平滑微缩放（`1.0 → 0.96`）并压暗至 35%，联动 `NiagaraCoinButton` 与软键盘轨迹无缝过渡。
 
 ## 核心特性
 - **流体字母波浪导轨**：左右双边缘自适应波浪字母检索，动态排除系统返回手势冲突，支持内拉直达首位应用。
 - **弹出式文件夹与通知胶囊**：常用应用内嵌未读消息摘要与快捷回复，支持原地展开胶囊文件夹。
 - **日出日落护眼调色盘**：6 套昼夜自适应极光壁纸，支持本地天气与农历节气状态展示。
-- **纯原生零依赖极速编译**：不依赖重型 Gradle 缓存，通过 `build.ps1`（Windows）或 GitHub Actions（Linux）直接调用 `aapt` + `javac` + `d8` 输出签名 APK。
+- **纯原生零依赖极速编译**：不依赖重型 Gradle 缓存，通过 `build.ps1`（Windows）、`build.sh`（Linux）或 GitHub Actions 直接调用 `aapt` + `javac` + `d8` 输出签名 APK。
 
 ## 云端与本地构建
-- **云端自动打包（免费）**：每次推送代码至 `main` 分支或手动触发 `Actions -> Build Android APK`，GitHub Actions 将自动编译并生成 `极简桌面-v2.5.0.apk` 与 `极简桌面-v2.5.0-direct.apk` 供直接下载。
+- **云端自动打包（免费）**：每次推送代码至 `main` 分支或手动触发 `Actions -> Build Android APK`，GitHub Actions 将自动编译并生成 `极简桌面-v2.6.0.apk` 与 `极简桌面-v2.6.0-direct.apk` 供直接下载。
 - **AI Agent 协作**：仓库内置 `AGENTS.md` 架构与构建指南，其他 AI Agent 接入仓库后可直接读取完整源码结构并完成修改与验证。

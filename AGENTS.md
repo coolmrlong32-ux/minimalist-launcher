@@ -1,8 +1,8 @@
-﻿# 极简桌面 (Minimalist Launcher · v2.5.0) — AI Agent 开发与构建规范
+﻿# 极简桌面 (Minimalist Launcher · v2.6.0) — AI Agent 开发与构建规范
 
 ## 1. 项目概览
 - **仓库名称**: `极简桌面`
-- **当前版本**: `v2.5.0` (`versionCode: 250`)
+- **当前版本**: `v2.6.0` (`versionCode: 260`)
 - **技术栈**: 纯原生 Android Java (JDK 17 编译目标 `--release 8`，`minSdkVersion 26`，`targetSdkVersion 34`)，**无 Gradle 依赖**，直接通过 Android Build Tools (`aapt` + `javac` + `d8` + `zipalign` + `apksigner`) 毫秒级打包。
 - **核心设计哲学**: 极简零冗余、单手拇指人体工学、流体字母波浪检索、原生弹出式文件夹与通知胶囊。
 
