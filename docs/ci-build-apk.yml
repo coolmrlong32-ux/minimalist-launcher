@@ -1,4 +1,4 @@
-﻿name: Build Android APK
+name: Build Android APK
 
 on:
   push:
@@ -20,11 +20,8 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Install Build Tools 34.0.0 & Platform 34
-        run: sdkmanager "build-tools;34.0.0" "platforms;android-34"
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "build-tools;34.0.0" "platforms;android-34"
 
       - name: Build & Sign APKs
         run: |
@@ -51,11 +48,11 @@ jobs:
             mkdir -p dist && cp "build/$OUT_APK" "dist/$OUT_APK"
           }
 
-          build_variant "com.niagara.loca2" "极简桌面-v2.5.0-direct.apk"
-          build_variant "com.niagara.local" "极简桌面-v2.5.0.apk"
+          build_variant "com.niagara.loca2" "极简桌面-v2.6.0-direct.apk"
+          build_variant "com.niagara.local" "极简桌面-v2.6.0.apk"
 
       - name: Upload Built APKs
         uses: actions/upload-artifact@v4
         with:
-          name: 极简桌面-v2.5.0-APKs
+          name: 极简桌面-v2.6.0-APKs
           path: dist/*.apk
