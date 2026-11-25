@@ -1,0 +1,19 @@
+﻿# Build outputs
+build/
+*.apk
+*.aab
+*.dex
+*.ap_
+*.idsig
+
+# Signing keys & local credentials
+*.keystore
+*.jks
+local.properties
+
+# IDE & OS temporary files
+.gradle/
+.idea/
+*.iml
+.DS_Store
+Thumbs.db

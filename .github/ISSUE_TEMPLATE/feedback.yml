@@ -1,0 +1,12 @@
+﻿name: 问题反馈与优化建议
+about: 提交 Bug 反馈或新功能优化想法
+title: "[优化] "
+labels: enhancement
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题描述或优化建议
+      placeholder: 请描述遇到的现象或希望增加的功能...
+    validations:
+      required: true
