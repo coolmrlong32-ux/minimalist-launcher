@@ -294,6 +294,7 @@ public class NotificationHubService extends NotificationListenerService {
         allByPkg = nextAll;
         latestByPkg = nextLatest;
         countByPkg = nextCounts;
+        activePackages = new HashSet<>(nextAll.keySet());
         notifyLauncher();
         return true;
     }

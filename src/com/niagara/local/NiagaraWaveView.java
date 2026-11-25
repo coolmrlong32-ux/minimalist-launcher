@@ -68,6 +68,7 @@ final class NiagaraWaveView extends View {
     private final String symbols;
     private final float dp;
     private final Paint letterPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint dotPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint crestCirclePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint crestTextPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final RectF pillRect = new RectF();
@@ -98,6 +99,8 @@ final class NiagaraWaveView extends View {
     private boolean pullArmed = false;
     private float pullExpandFrac = 0f;
     private boolean autoHideIdle = false;
+    private boolean idleDotsMode = true;
+    private boolean silentAtRest = false;
     private ValueAnimator releaseAnim;
     private ValueAnimator pullExpandAnim;
 
@@ -144,6 +147,22 @@ final class NiagaraWaveView extends View {
     void setAlignLeft(boolean left) {
         this.alignLeft = left;
         invalidate();
+    }
+
+    /** 原生 Niagara 风格：静默态渲染极简圆点，触碰滑动时平滑形变为波浪字母。 */
+    void setIdleDotsMode(boolean dots) {
+        if (this.idleDotsMode != dots) {
+            this.idleDotsMode = dots;
+            invalidate();
+        }
+    }
+
+    /** 静止态完全隐形、仅在触碰本侧边缘时在本侧展开镜像波浪（用于左手边缘导轨）。 */
+    void setSilentAtRest(boolean silent) {
+        if (this.silentAtRest != silent) {
+            this.silentAtRest = silent;
+            invalidate();
+        }
     }
 
     void setGhostEdgeDelegate(NiagaraWaveView target, boolean isLeftEdge) {
@@ -294,7 +313,7 @@ final class NiagaraWaveView extends View {
     @Override
     protected void onDraw(Canvas canvas) {
         if (ghostEdgeTrigger || theme == null) return;
-        if (autoHideIdle && waveStrength <= 0.01f) return;
+        if ((autoHideIdle || silentAtRest) && waveStrength <= 0.01f) return;
 
         int w = getWidth(), h = getHeight();
         if (w <= 0 || h <= 0) return;
@@ -322,9 +341,13 @@ final class NiagaraWaveView extends View {
         }
 
         float sigma = WAVE_SIGMA_DP * dp;
-        float extraPull = Math.min(26f * dp, Math.max(0f, pullDepthPx - railWidth()) * 0.30f);
+        float extraPull = Math.min(24f * dp, Math.max(0f, pullDepthPx - railWidth()) * 0.28f);
         float maxShiftPx = (MAX_WAVE_PEAK_DP * dp + extraPull) * waveStrength;
         boolean waving = waveStrength > 0.01f && smoothY >= 0;
+
+        boolean useDots = idleDotsMode && !silentAtRest;
+        float dotVis = useDots ? Math.max(0f, 1f - waveStrength * 2.4f) : 0f;
+        float letterVis = useDots ? Math.min(1f, waveStrength * 1.9f) : 1f;
 
         for (int i = 0; i < symbols.length(); i++) {
             char ch = symbols.charAt(i);
@@ -335,6 +358,20 @@ final class NiagaraWaveView extends View {
             boolean isActive = (i == activeIdx && waveStrength > 0.12f);
 
             boolean hasApp = ch == '★' || availableLetters.contains(ch);
+
+            if (dotVis > 0.01f) {
+                int baseDotCol = (ch == '★')
+                        ? theme.accent
+                        : (hasApp ? theme.textPrimary : theme.textSecondary);
+                int dotAlpha = hasApp ? (theme.isLight ? 0x9E : 0xA8) : (theme.isLight ? 0x2C : 0x30);
+                dotPaint.setColor(baseDotCol);
+                dotPaint.setAlpha(Math.round(dotAlpha * dotVis));
+                float dotR = (ch == '★') ? (2.25f * dp) : (hasApp ? 1.65f * dp : 0.90f * dp);
+                canvas.drawCircle(drawX, drawY, dotR, dotPaint);
+            }
+
+            if (letterVis <= 0.01f) continue;
+
             int color;
             if (isActive) {
                 color = theme.accent;
@@ -345,9 +382,9 @@ final class NiagaraWaveView extends View {
                 color = (theme.textSecondary & 0x00FFFFFF) | (waveStrength > 0.1f ? 0x66000000 : 0x34000000);
             }
             // 焦点字母 100% 不透明，远端字母随波浪强度衰减至 45%
-            float alphaMul = 1f - 0.55f * waveStrength * (1f - factor);
+            float alphaMul = (1f - 0.55f * waveStrength * (1f - factor)) * letterVis;
             letterPaint.setColor(color);
-            letterPaint.setAlpha(Math.round(((color >>> 24) & 0xFF) * Math.max(0.2f, Math.min(1f, alphaMul))));
+            letterPaint.setAlpha(Math.round(((color >>> 24) & 0xFF) * Math.max(0f, Math.min(1f, alphaMul))));
             letterPaint.setTextSize(10.2f * dp * (1f + 0.65f * focus));
             letterPaint.setTypeface(isActive ? Typeface.create(typeface, Typeface.BOLD) : typeface);
 
@@ -355,25 +392,25 @@ final class NiagaraWaveView extends View {
             canvas.drawText(String.valueOf(ch), drawX, baseline, letterPaint);
         }
 
-        if (activeIdx >= 0 && waveStrength > 0.06f && smoothY >= 0) {
+        if (activeIdx >= 0 && waveStrength > 0.08f && smoothY >= 0) {
             char ch = symbols.charAt(activeIdx);
             float badgeScale = Math.min(1f, waveStrength * 1.12f);
             float activeDrawY = slot * activeIdx + slot * 0.5f;
             float activeDrawX = baseX + dir * maxShiftPx * calculateGaussianFactor(activeDrawY, smoothY, sigma);
-            float circleR = 19.0f * dp * badgeScale;
-            float circleCx = activeDrawX + dir * 34f * dp * badgeScale;
-            float circleCy = Math.max(circleR + 8f * dp, Math.min(h - circleR - 8f * dp, smoothY - 4f * dp));
+            float circleR = 16.5f * dp * badgeScale;
+            float circleCx = activeDrawX + dir * 28f * dp * badgeScale;
+            float circleCy = Math.max(circleR + 8f * dp, Math.min(h - circleR - 8f * dp, smoothY - 2f * dp));
 
             crestCirclePaint.setColor(pullArmed ? theme.accent : theme.accentBubble);
-            crestCirclePaint.setShadowLayer(7f * dp, 0f, 2.5f * dp, 0x38000000);
+            crestCirclePaint.setShadowLayer(4.5f * dp, 0f, 1.8f * dp, 0x28000000);
 
             String previewApp = topAppPreview.get(ch);
             if (pullExpandFrac > 0.02f && previewApp != null && !previewApp.isEmpty()) {
                 String launchLabel = "⚡ " + previewApp;
-                crestTextPaint.setTextSize(13.5f * dp);
+                crestTextPaint.setTextSize(13.0f * dp);
                 crestTextPaint.setTypeface(Typeface.create(typeface, Typeface.BOLD));
                 float tw = crestTextPaint.measureText(launchLabel);
-                float fullPillW = Math.max(circleR * 2f, tw + 24f * dp);
+                float fullPillW = Math.max(circleR * 2f, tw + 22f * dp);
                 float curW = circleR * 2f + (fullPillW - circleR * 2f) * pullExpandFrac;
                 if (alignLeft) {
                     pillRect.set(circleCx - circleR, circleCy - circleR, circleCx - circleR + curW, circleCy + circleR);
@@ -391,7 +428,7 @@ final class NiagaraWaveView extends View {
             } else {
                 canvas.drawCircle(circleCx, circleCy, circleR, crestCirclePaint);
                 crestTextPaint.setColor(0xFFFFFFFF);
-                crestTextPaint.setTextSize(16.5f * dp * badgeScale);
+                crestTextPaint.setTextSize(15.0f * dp * badgeScale);
                 crestTextPaint.setTypeface(Typeface.create(typeface, Typeface.BOLD));
                 float by = circleCy - (crestTextPaint.descent() + crestTextPaint.ascent()) * 0.5f;
                 canvas.drawText(String.valueOf(ch), circleCx, by, crestTextPaint);

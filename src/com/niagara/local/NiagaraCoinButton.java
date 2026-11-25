@@ -38,6 +38,8 @@ final class NiagaraCoinButton extends View {
 
     private AuroraTheme theme;
     private ActionCallback callback;
+    private LinearGradient cachedBgShader;
+    private int cachedShaderW = 0, cachedShaderH = 0;
     private int iconMode = ICON_RECENTS;
     private float downX, downY;
     private boolean pressedState = false;
@@ -71,7 +73,14 @@ final class NiagaraCoinButton extends View {
 
     void bindTheme(AuroraTheme theme) {
         this.theme = theme;
+        this.cachedBgShader = null;
         invalidate();
+    }
+
+    @Override
+    protected void onSizeChanged(int w, int h, int oldw, int oldh) {
+        super.onSizeChanged(w, h, oldw, oldh);
+        this.cachedBgShader = null;
     }
 
     void setSearchProgress(float progress) {
@@ -99,8 +108,14 @@ final class NiagaraCoinButton extends View {
         float cx = w * 0.5f, cy = h * 0.5f;
         float r = Math.min(w, h) * 0.5f - 2f * dp;
 
-        int[] cols = theme.coinButtonGradientColors();
-        bgPaint.setShader(new LinearGradient(0, 0, w, h, cols[0], cols[1], Shader.TileMode.CLAMP));
+        int iw = getWidth(), ih = getHeight();
+        if (cachedBgShader == null || cachedShaderW != iw || cachedShaderH != ih) {
+            int[] cols = theme.coinButtonGradientColors();
+            cachedBgShader = new LinearGradient(0, 0, w, h, cols[0], cols[1], Shader.TileMode.CLAMP);
+            cachedShaderW = iw;
+            cachedShaderH = ih;
+        }
+        bgPaint.setShader(cachedBgShader);
         canvas.drawCircle(cx, cy, r, bgPaint);
 
         ringPaint.setStrokeWidth((1.0f + 0.8f * searchProgress) * dp);

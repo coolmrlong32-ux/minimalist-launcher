@@ -15,7 +15,7 @@ if [ ! -f "$AJ" ]; then
 fi
 
 VERSION_NAME=$(grep -oP 'android:versionName="\K[^"]+' AndroidManifest.xml | head -n 1)
-VERSION_NAME="${VERSION_NAME:-2.5.0}"
+VERSION_NAME="${VERSION_NAME:-2.7.0}"
 
 build_variant() {
     local PKG="$1"

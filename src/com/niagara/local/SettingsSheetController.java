@@ -76,6 +76,7 @@ final class SettingsSheetController {
         void onTextScaleChanged(float scale);
         void onUse24HChanged(boolean use24h);
         void onStatusBarFullChanged(boolean full);
+        void onHeroHighContrastChanged(boolean highContrast);
         void onFavCardsChanged(boolean on);
         void onOneHandGravityChanged(boolean on);
         void onShowMediaChanged(boolean on);
@@ -83,6 +84,7 @@ final class SettingsSheetController {
         void openWidgetManager();
         void showDensityPicker();
         void onPullDownSearchChanged(boolean on);
+        void onWaveIdleDotsChanged(boolean dots);
         void onCoinLeftChanged(boolean left);
         void showCoinActionPicker();
         void onPullLaunchChanged(boolean on);
@@ -169,8 +171,13 @@ final class SettingsSheetController {
 
         LinearLayout titleCol = new LinearLayout(ctx);
         titleCol.setOrientation(LinearLayout.VERTICAL);
+        String verName = "2.7.0";
+        try {
+            String vn = ctx.getPackageManager().getPackageInfo(ctx.getPackageName(), 0).versionName;
+            if (vn != null && !vn.isEmpty()) verName = vn;
+        } catch (Throwable ignored) {}
         TextView titleTv = makeText(ctx, tf, host.sp(19f), theme.textPrimary, true, "流光桌面设置");
-        TextView subTv = makeText(ctx, tf, host.sp(11.5f), theme.textSecondary, false, "v2.5.0 · 原生极简进化与微件版");
+        TextView subTv = makeText(ctx, tf, host.sp(11.5f), theme.textSecondary, false, "v" + verName + " · 原生 Niagara 极简体验版");
         subTv.setPadding(0, Math.round(2 * dp), 0, 0);
         titleCol.addView(titleTv);
         titleCol.addView(subTv);
@@ -342,6 +349,10 @@ final class SettingsSheetController {
                 prefs.getBoolean("status_bar_full_v1", false), host::onStatusBarFullChanged);
 
         addDivider(ctx, theme, dp, gHome);
+        addSwitchRow(ctx, tf, host, theme, dp, gHome, IC_SUN, "状态栏高对比度排版", "增强浅色或复杂壁纸下天气、电量的文字清晰度",
+                prefs.getBoolean("hero_high_contrast_v1", false), host::onHeroHighContrastChanged);
+
+        addDivider(ctx, theme, dp, gHome);
         addSwitchRow(ctx, tf, host, theme, dp, gHome, IC_CARD, "常用应用毛玻璃底衬", "为首页常用应用行添加柔光卡片背景",
                 prefs.getBoolean("fav_cards_v2", false), host::onFavCardsChanged);
 
@@ -379,6 +390,10 @@ final class SettingsSheetController {
 
         addSwitchRow(ctx, tf, host, theme, dp, gGesture, IC_GESTURE, "首页下拉呼出极速搜索", "关闭则首页下拉直接展开系统通知栏",
                 prefs.getBoolean("pull_down_search_v1", true), host::onPullDownSearchChanged);
+
+        addDivider(ctx, theme, dp, gGesture);
+        addSwitchRow(ctx, tf, host, theme, dp, gGesture, IC_SPARK, "字母导轨静默圆点模式", "原生 Niagara 风格：静止显示极简圆点，触碰展开流体字母",
+                prefs.getBoolean("wave_idle_dots_v1", true), host::onWaveIdleDotsChanged);
 
         addDivider(ctx, theme, dp, gGesture);
         addActionRow(ctx, tf, host, theme, dp, gGesture, IC_GESTURE, "悬浮按钮轻点动作", "可切换为极速搜索、多任务后台、语音或隐藏",

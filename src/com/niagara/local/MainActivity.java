@@ -253,6 +253,8 @@ public class MainActivity extends Activity {
     private static final String K_KEEP_ALIVE = "keep_alive";
     private static final String K_SORT_BY_USAGE = "sort_by_usage";
     private static final String K_STATUS_BAR_FULL = "status_bar_full_v1";
+    private static final String K_HERO_HIGH_CONTRAST = "hero_high_contrast_v1";
+    private static final String K_WAVE_IDLE_DOTS = "wave_idle_dots_v1";
     private static final String K_ICON_PACK = "icon_pack_pkg_v1";
     private static final String K_CUSTOM_ICONS = "custom_app_icons_v1";
     private static final String K_ONE_HAND_GRAVITY = "one_hand_gravity_v1";
@@ -314,7 +316,8 @@ public class MainActivity extends Activity {
 
     // 视图组件
     private AuroraBackdropView backdropView;
-    private LinearLayout persistentTopHeader; // 常驻顶部：超大大气时钟 + 日期/农历 + 状态栏 + 一览组件
+    private LinearLayout workspaceMainColumn;
+    private LinearLayout persistentTopHeader; // 首页顶部：大时钟 + 日期/农历 + 状态栏 + 一览组件
     private LinearLayout firstPageExtrasBox;  // 保留字段兼容
     private View heroSpacerTop, heroSpacerBottom;
     private TextClock mainClockView;
@@ -343,6 +346,12 @@ public class MainActivity extends Activity {
     private StreamAdapter streamAdapter;
     private NiagaraWaveView rightWaveBar, leftGhostWaveBar;
     private NiagaraCoinButton coinButton;
+
+    private int currentTopInsetPx = 0;
+    private int currentNavBottomPx = 0;
+    private int currentImeBottomPx = 0;
+    private final Map<String, Drawable> folderIconCache = new HashMap<>();
+    private Map<String, String> customIconsCache = null;
 
     private GestureDetector gestureDetector;
     private Dialog currentSheetDialog;
@@ -636,6 +645,7 @@ public class MainActivity extends Activity {
         // 2. 主纵向容器
         final LinearLayout mainColumn = new LinearLayout(this);
         mainColumn.setOrientation(LinearLayout.VERTICAL);
+        workspaceMainColumn = mainColumn;
 
         // 2.1 常驻顶部时钟与日期栏（如视频 9995.mp4 所示：左上方大时钟 + 日期星期 + 状态行，在首页与全部应用页均常驻）
         persistentTopHeader = new LinearLayout(this);
@@ -682,43 +692,46 @@ public class MainActivity extends Activity {
         dateLunarView.setOnLongClickListener(v -> { openControlCenterSheet(); return true; });
         persistentTopHeader.addView(dateLunarView);
 
-        // 首页顶部无边框极简状态栏（方案 A：去边框、精简天气+高质感电量，支持设置切换完整模式）
+        // 首页顶部无边框极简状态栏（方案 A：去边框、精简天气+高质感电量，支持设置切换完整模式与高对比度）
         heroStatusBar = new HeroStatusBarView(this, theme, typeface, textScale, prefs.getBoolean(K_STATUS_BAR_FULL, false), new HeroStatusBarView.Callbacks() {
             @Override public void onWeatherClick() { handleWeatherBarClick(); }
             @Override public void onDeviceStatusClick() { showDeviceStatusDialog(); }
             @Override public void onLongPress() { openControlCenterSheet(); }
         });
+        heroStatusBar.setAestheticStyle(prefs.getBoolean(K_HERO_HIGH_CONTRAST, false)
+                ? HeroStatusBarView.STYLE_HIGH_CONTRAST : HeroStatusBarView.STYLE_AIRY);
         LinearLayout.LayoutParams dsLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         dsLp.topMargin = dp(6);
-        dsLp.bottomMargin = dp(4);
+        dsLp.bottomMargin = dp(2);
         persistentTopHeader.addView(heroStatusBar, dsLp);
 
-        // 一览日程条（有近期日程且开启时自动出现在状态栏下方）
-        agendaPill = makeText("", 12.6f, theme.textPrimary, false);
+        // 一览日程行（原生 Niagara 无框排版：有近期日程且开启时轻盈浮现在状态栏下方）
+        agendaPill = makeText("", 12.6f, theme.isLight ? 0xCC141824 : 0xD9F1F5F9, false);
         agendaPill.setSingleLine(true);
         agendaPill.setEllipsize(TextUtils.TruncateAt.END);
-        agendaPill.setBackground(theme.subtleGhostPill(dpUnit, 12));
-        agendaPill.setPadding(dp(11), dp(6), dp(11), dp(6));
+        agendaPill.setPadding(dp(2), dp(4), dp(4), dp(2));
+        agendaPill.setShadowLayer(theme.isLight ? dp(0.9f) : dp(2.0f), 0f, dp(0.6f), theme.isLight ? 0x16000000 : 0x48000000);
         agendaPill.setVisibility(View.GONE);
         agendaPill.setOnClickListener(v -> openActiveCalendarEvent());
         LinearLayout.LayoutParams agLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        agLp.topMargin = dp(4);
+        agLp.topMargin = dp(2);
         persistentTopHeader.addView(agendaPill, agLp);
 
-        // 桌面速记便签条（非空时自然出现在首页顶部，留空自动隐藏）
-        stickyNotePill = makeText("", 12.6f, theme.textPrimary, false);
+        // 桌面速记便签行（无边框轻排版，留空自动隐藏）
+        stickyNotePill = makeText("", 12.6f, theme.isLight ? 0xCC141824 : 0xD9F1F5F9, false);
         stickyNotePill.setSingleLine(true);
         stickyNotePill.setEllipsize(TextUtils.TruncateAt.END);
-        stickyNotePill.setBackground(theme.subtleGhostPill(dpUnit, 12));
-        stickyNotePill.setPadding(dp(11), dp(6), dp(11), dp(6));
+        stickyNotePill.setPadding(dp(2), dp(3), dp(4), dp(2));
+        stickyNotePill.setShadowLayer(theme.isLight ? dp(0.9f) : dp(2.0f), 0f, dp(0.6f), theme.isLight ? 0x16000000 : 0x48000000);
         stickyNotePill.setVisibility(View.GONE);
         stickyNotePill.setOnClickListener(v -> promptEditStickyNote());
         LinearLayout.LayoutParams snPillLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        snPillLp.topMargin = dp(4);
+        snPillLp.topMargin = dp(2);
         persistentTopHeader.addView(stickyNotePill, snPillLp);
+        refreshStickyNotePill();
 
         // 一览媒体播放器（播放音乐时自动浮现，带专辑封面与进度控制）
         mediaWaveCard = buildMediaWaveCard();
@@ -738,119 +751,9 @@ public class MainActivity extends Activity {
 
         mainColumn.addView(persistentTopHeader);
 
-        // 2.2 第一页专属轻量化布局：方案 B（中间快搜 + 桌面速记便签） + 人体工学无边框 Dock
-        firstPageExtrasBox = new LinearLayout(this);
-        firstPageExtrasBox.setOrientation(LinearLayout.VERTICAL);
-
-        // 上半部呼吸留白
-        heroSpacerTop = new View(this);
-        LinearLayout.LayoutParams stLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 0, 0.45f);
-        heroSpacerTop.setMinimumHeight(dp(20));
-        firstPageExtrasBox.addView(heroSpacerTop, stLp);
-
-        // 中间插件 1：宽域微光极速快搜栏
-        LinearLayout quickSearchCard = new LinearLayout(this);
-        quickSearchCard.setOrientation(LinearLayout.HORIZONTAL);
-        quickSearchCard.setGravity(Gravity.CENTER_VERTICAL);
-        quickSearchCard.setBackground(theme.glassCard(dpUnit, 20));
-        quickSearchCard.setPadding(dp(16), dp(11), dp(14), dp(11));
-
-        TextView qsIcon = makeText("🔍", 14.5f, theme.accent, false);
-        qsIcon.setPadding(0, 0, dp(10), 0);
-        quickSearchCard.addView(qsIcon);
-
-        TextView qsHint = makeText("搜索应用 / 拼音 / 算式...", 13.2f, theme.textSecondary, false);
-        quickSearchCard.addView(qsHint, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
-
-        TextView qsPaste = makeText("粘贴", 11.2f, theme.accent, true);
-        qsPaste.setBackground(theme.accentGlowPill(dpUnit, 12));
-        qsPaste.setPadding(dp(10), dp(4), dp(10), dp(4));
-        qsPaste.setOnClickListener(v -> {
-            openInstantSearch();
-            ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
-            if (cm != null && cm.hasPrimaryClip() && cm.getPrimaryClip() != null && cm.getPrimaryClip().getItemCount() > 0) {
-                CharSequence clip = cm.getPrimaryClip().getItemAt(0).getText();
-                if (clip != null && clip.length() > 0 && searchInput != null) {
-                    searchInput.setText(clip.toString().trim());
-                    searchInput.setSelection(searchInput.getText().length());
-                }
-            }
-        });
-        quickSearchCard.addView(qsPaste);
-        quickSearchCard.setOnClickListener(v -> openInstantSearch());
-        firstPageExtrasBox.addView(quickSearchCard);
-
-        // 中间插件 2：精致桌面速记便签卡片
-        LinearLayout stickyNoteCard = new LinearLayout(this);
-        stickyNoteCard.setOrientation(LinearLayout.VERTICAL);
-        stickyNoteCard.setBackground(theme.glassCard(dpUnit, 18));
-        stickyNoteCard.setPadding(dp(16), dp(11), dp(16), dp(11));
-
-        LinearLayout snHdrRow = new LinearLayout(this);
-        snHdrRow.setGravity(Gravity.CENTER_VERTICAL);
-        TextView snTitle = makeText("📌 桌面速记", 12.0f, theme.accent, true);
-        snHdrRow.addView(snTitle, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
-        TextView snEditHint = makeText("点击编辑 ✎", 11.0f, theme.textSecondary, false);
-        snHdrRow.addView(snEditHint);
-        stickyNoteCard.addView(snHdrRow);
-
-        stickyNoteSummaryView = makeText("", 13.0f, theme.textPrimary, false);
-        stickyNoteSummaryView.setPadding(0, dp(4), 0, 0);
-        stickyNoteSummaryView.setMaxLines(2);
-        stickyNoteSummaryView.setEllipsize(TextUtils.TruncateAt.END);
-        stickyNoteCard.addView(stickyNoteSummaryView);
-        stickyNoteCard.setOnClickListener(v -> promptEditStickyNote());
-
-        LinearLayout.LayoutParams snLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        snLp.topMargin = dp(10);
-        firstPageExtrasBox.addView(stickyNoteCard, snLp);
-        refreshStickyNotePill();
-
-        // 下半部呼吸留白
-        heroSpacerBottom = new View(this);
-        LinearLayout.LayoutParams sbLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 0, 0.55f);
-        heroSpacerBottom.setMinimumHeight(dp(24));
-        firstPageExtrasBox.addView(heroSpacerBottom, sbLp);
-
-        // 底部 2 行 x 4 列高频应用与后台直达 Dock（人体工学黄金触控区 + 彻底移除边框）
-        recentDockCard = new LinearLayout(this);
-        recentDockCard.setOrientation(LinearLayout.VERTICAL);
-        recentDockCard.setBackground(null); // 去掉边框与灰色背景，纯净悬浮！
-        recentDockCard.setPadding(0, dp(4), 0, dp(4));
-
-        dockRow1 = new LinearLayout(this);
-        dockRow1.setOrientation(LinearLayout.HORIZONTAL);
-        dockRow1.setGravity(Gravity.CENTER_VERTICAL);
-        recentDockCard.addView(dockRow1, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        dockRow2 = new LinearLayout(this);
-        dockRow2.setOrientation(LinearLayout.HORIZONTAL);
-        dockRow2.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout.LayoutParams r2Lp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        r2Lp.topMargin = dp(12);
-        recentDockCard.addView(dockRow2, r2Lp);
-
-        LinearLayout.LayoutParams dockCardLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        dockCardLp.bottomMargin = dp(52); // 人体工学舒适抬高，自然贴合单手大拇指舒适弧线！
-        firstPageExtrasBox.addView(recentDockCard, dockCardLp);
-
-        firstPageExtrasBox.setVisibility(View.GONE);
-        LinearLayout.LayoutParams extrasLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        mainColumn.addView(firstPageExtrasBox, extrasLp);
-
-        // 2.3 极速搜索与计算器输入卡（点击右下角按钮或头部上滑时呼出）
+        // 2.2 极速搜索与计算器输入卡（v2.7.0 改为贴底单手悬浮，紧贴软键盘顶缘）
         searchBarCard = buildSearchBarCard();
-        LinearLayout.LayoutParams searchLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        searchLp.topMargin = dp(8);
-        mainColumn.addView(searchBarCard, searchLp);
+        searchBarCard.setElevation(dp(10));
 
         // 2.4 主应用列表 (第一页常用应用流 / 字母分组全部应用流)
         streamListView = new ListView(this);
@@ -919,16 +822,20 @@ public class MainActivity extends Activity {
         shLp.bottomMargin = dp(96);
         root.addView(swipeHintPill, shLp);
 
-        // 3. 左右双侧流体波浪导轨：左右手采用完全一致的交互逻辑（水平向内滑返回，垂直沿边缘滑流体字母查找）
+        // 3. 左右双侧流体波浪导轨：右侧支持静默圆点/字母切换，左侧支持真正的本侧镜像展开（静止完全隐形）
         rightWaveBar = new NiagaraWaveView(this, WAVE_SYMBOLS);
         rightWaveBar.setAlignLeft(false);
         leftGhostWaveBar = new NiagaraWaveView(this, WAVE_SYMBOLS);
-        leftGhostWaveBar.setGhostEdgeDelegate(rightWaveBar, true);
+        leftGhostWaveBar.setAlignLeft(true);
+        leftGhostWaveBar.setSilentAtRest(true);
         leftGhostWaveBar.setVisibility(View.VISIBLE);
 
         boolean autoHideWave = prefs.getBoolean(K_AUTO_HIDE_WAVE, false);
+        boolean idleDots = prefs.getBoolean(K_WAVE_IDLE_DOTS, true);
         rightWaveBar.bindStyle(theme, typeface, autoHideWave);
+        rightWaveBar.setIdleDotsMode(idleDots);
         leftGhostWaveBar.bindStyle(theme, typeface, autoHideWave);
+        leftGhostWaveBar.setIdleDotsMode(idleDots);
 
         NiagaraWaveView.Listener waveListener = new NiagaraWaveView.Listener() {
             @Override
@@ -971,21 +878,30 @@ public class MainActivity extends Activity {
             }
         };
         rightWaveBar.setListener(waveListener);
+        leftGhostWaveBar.setListener(waveListener);
         setupWaveListCoupling();
 
         root.addView(rightWaveBar, new FrameLayout.LayoutParams(
                 dp(210), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END));
         root.addView(leftGhostWaveBar, new FrameLayout.LayoutParams(
-                dp(42), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.START));
+                dp(210), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.START));
 
-        // 4. 右下角 Niagara 灵动悬浮按钮（支持多任务后台 / 极速搜索 / 小布语音 / 隐藏）
+        // 3.5 贴底悬浮搜索栏（紧贴软键盘上方，拇指零伸展直达）
+        final FrameLayout.LayoutParams searchCardLp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM);
+        searchCardLp.leftMargin = dp(16);
+        searchCardLp.rightMargin = dp(16);
+        searchCardLp.bottomMargin = dp(12);
+        root.addView(searchBarCard, searchCardLp);
+
+        // 4. 右下角 Niagara 灵动悬浮按钮（默认极速搜索，支持多任务后台 / 小布语音 / 隐藏）
         coinButton = new NiagaraCoinButton(this);
         coinButton.bindTheme(theme);
         applyCoinButtonConfig();
         coinButton.setCallback(new NiagaraCoinButton.ActionCallback() {
             @Override
             public void onTap() {
-                int act = prefs.getInt(K_COIN_TAP_ACTION, 0);
+                int act = prefs.getInt(K_COIN_TAP_ACTION, 1);
                 if (act == 1) {
                     if (searchActive) closeInstantSearch();
                     else openInstantSearch();
@@ -1007,7 +923,7 @@ public class MainActivity extends Activity {
             @Override
             public void onSwipeLeft() {
                 if (searchActive || inAllAppsMode) returnToHomeFavorites();
-                else if (prefs.getInt(K_COIN_TAP_ACTION, 0) == 1) quickLaunchRecentsOverview();
+                else if (prefs.getInt(K_COIN_TAP_ACTION, 1) == 1) quickLaunchRecentsOverview();
                 else openInstantSearch();
             }
             @Override
@@ -1023,29 +939,57 @@ public class MainActivity extends Activity {
 
         root.setOnApplyWindowInsetsListener((v, insets) -> {
             int topInset = insets.getSystemWindowInsetTop();
-            int botInset = insets.getSystemWindowInsetBottom();
+            int navBottom = insets.getSystemWindowInsetBottom();
+            int imeBottom = 0;
+            if (Build.VERSION.SDK_INT >= 30) {
+                try {
+                    topInset = insets.getInsets(android.view.WindowInsets.Type.statusBars()).top;
+                    navBottom = insets.getInsets(android.view.WindowInsets.Type.navigationBars()).bottom;
+                    imeBottom = insets.getInsets(android.view.WindowInsets.Type.ime()).bottom;
+                } catch (Throwable ignored) {}
+            } else {
+                imeBottom = navBottom;
+            }
+            currentTopInsetPx = topInset;
+            currentNavBottomPx = navBottom;
+            currentImeBottomPx = Math.max(navBottom, imeBottom);
+
             mainColumn.setPadding(dp(22), topInset + dp(20), dp(34), 0);
-            int topListPad = (inAllAppsMode || searchActive) ? dp(2) : dp(10);
-            streamListView.setPadding(0, topListPad, 0, botInset + dp(88));
+            applySearchBarInsets();
+            applyOneHandedListPadding();
 
             for (NiagaraWaveView wb : new NiagaraWaveView[]{leftGhostWaveBar, rightWaveBar}) {
                 FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) wb.getLayoutParams();
                 // 🚀 人体工学下移：把字母导轨整体下调至单手大拇指舒适弧形区，单手大拇指自然落在最上方的字母
-                lp.topMargin = topInset + dp(192);
-                lp.bottomMargin = botInset + dp(90);
+                lp.topMargin = topInset + dp(168);
+                lp.bottomMargin = navBottom + dp(90);
                 wb.setLayoutParams(lp);
             }
             boolean coinOnLeft = prefs.getBoolean(K_COIN_LEFT, false);
             coinLp.gravity = Gravity.BOTTOM | (coinOnLeft ? Gravity.START : Gravity.END);
-            coinLp.bottomMargin = botInset + dp(20);
+            coinLp.bottomMargin = navBottom + dp(20);
             coinLp.leftMargin = coinOnLeft ? dp(22) : 0;
             coinLp.rightMargin = coinOnLeft ? 0 : dp(18);
             coinButton.setLayoutParams(coinLp);
             coinButton.bringToFront();
+            if (searchBarCard != null) searchBarCard.bringToFront();
             return insets;
         });
 
         return root;
+    }
+
+    private void applySearchBarInsets() {
+        if (searchBarCard == null) return;
+        ViewGroup.LayoutParams rawLp = searchBarCard.getLayoutParams();
+        if (rawLp instanceof FrameLayout.LayoutParams) {
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) rawLp;
+            int targetBot = Math.max(currentNavBottomPx, currentImeBottomPx) + dp(10);
+            if (lp.bottomMargin != targetBot) {
+                lp.bottomMargin = targetBot;
+                searchBarCard.setLayoutParams(lp);
+            }
+        }
     }
 
     /**
@@ -1081,11 +1025,11 @@ public class MainActivity extends Activity {
         hideSoftKeyboard();
     }
 
-    // ---------- v2.6.0 边缘波浪导轨 ↔ 主列表物理联动 ----------
+    // ---------- v2.7.0 边缘波浪导轨 ↔ 主列表物理联动（安全区内微推 + 图标视差，零左边界裁切） ----------
     private static final float WAVE_LIST_SIGMA_DP = 72f;          // 列表高斯σ
-    private static final float WAVE_LIST_PUSH_DP = 36f;           // 列表项最大横向内推
-    private static final float WAVE_LIST_ICON_PARALLAX_DP = 12f;  // 图标额外视差
-    private static final float WAVE_LIST_SCALE_GAIN = 0.04f;      // 微缩放增益
+    private static final float WAVE_LIST_PUSH_DP = 12f;           // 列表项最大横向内推（< 22dp 左边距，永不裁切图标）
+    private static final float WAVE_LIST_ICON_PARALLAX_DP = 4f;   // 图标额外视差
+    private static final float WAVE_LIST_SCALE_GAIN = 0.03f;      // 微缩放增益
     private static final long WAVE_REBOUND_MS = 180L;             // 松手阻尼回弹时长
 
     private boolean waveCouplingActive = false;
@@ -1095,13 +1039,18 @@ public class MainActivity extends Activity {
     private final int[] waveListLoc = new int[2];
 
     private void setupWaveListCoupling() {
-        if (rightWaveBar == null) return;
-        rightWaveBar.setOnWaveScrubListener(new NiagaraWaveView.OnWaveScrubListener() {
+        bindWaveCoupling(rightWaveBar, -1f);
+        bindWaveCoupling(leftGhostWaveBar, 1f);
+    }
+
+    private void bindWaveCoupling(NiagaraWaveView bar, final float dir) {
+        if (bar == null) return;
+        bar.setOnWaveScrubListener(new NiagaraWaveView.OnWaveScrubListener() {
             @Override
             public void onWaveScrubStart() {
                 cancelWaveRebound();
                 waveCouplingActive = true;
-                waveCouplingDir = rightWaveBar.isScrubFromLeft() ? 1f : -1f;
+                waveCouplingDir = dir;
             }
 
             @Override
@@ -1281,9 +1230,20 @@ public class MainActivity extends Activity {
         if (streamListView == null) return;
         int left = streamListView.getPaddingLeft();
         int right = streamListView.getPaddingRight();
-        int botPad = dp(82);
-        if (inAllAppsMode || searchActive || !prefs.getBoolean(K_ONE_HAND_GRAVITY, true)) {
-            streamListView.setPadding(left, dp(4), right, botPad);
+        int navBot = currentNavBottomPx;
+        if (searchActive) {
+            int searchBotPad = Math.max(navBot, currentImeBottomPx) + dp(82);
+            if (streamListView.getPaddingTop() != dp(12) || streamListView.getPaddingBottom() != searchBotPad) {
+                streamListView.setPadding(left, dp(12), right, searchBotPad);
+            }
+            return;
+        }
+        int botPad = navBot + dp(82);
+        if (inAllAppsMode || !prefs.getBoolean(K_ONE_HAND_GRAVITY, true)) {
+            int topP = inAllAppsMode ? dp(6) : dp(4);
+            if (streamListView.getPaddingTop() != topP || streamListView.getPaddingBottom() != botPad) {
+                streamListView.setPadding(left, topP, right, botPad);
+            }
             return;
         }
         int availH = streamListView.getHeight();
@@ -1310,8 +1270,8 @@ public class MainActivity extends Activity {
 
     private void applyCoinButtonConfig() {
         if (coinButton == null) return;
-        int act = prefs.getInt(K_COIN_TAP_ACTION, 0);
-        if (act == 3) {
+        int act = prefs.getInt(K_COIN_TAP_ACTION, 1);
+        if (act == 3 || searchActive) {
             coinButton.setVisibility(View.GONE);
         } else {
             coinButton.setVisibility(View.VISIBLE);
@@ -1415,6 +1375,10 @@ public class MainActivity extends Activity {
             firstPageExtrasBox.setVisibility(View.GONE);
         }
         boolean homeOnly = !inAllAppsMode && !searchActive;
+        if (persistentTopHeader != null) {
+            // 原生 Niagara 逻辑：切入全部应用或搜索态时收起顶部大时钟区，释放完整列表可视空间
+            persistentTopHeader.setVisibility(homeOnly ? View.VISIBLE : View.GONE);
+        }
         if (agendaPill != null && !homeOnly) agendaPill.setVisibility(View.GONE);
         if (stickyNotePill != null && !homeOnly) stickyNotePill.setVisibility(View.GONE);
         if (mediaWaveCard != null && !homeOnly) mediaWaveCard.setVisibility(View.GONE);
@@ -1429,8 +1393,11 @@ public class MainActivity extends Activity {
         }
         if (streamListView != null) {
             streamListView.setVisibility(View.VISIBLE);
+            streamListView.setStackFromBottom(searchActive);
             applyOneHandedListPadding();
         }
+        applySearchBarInsets();
+        applyCoinButtonConfig();
         if (rightWaveBar != null) {
             rightWaveBar.setBackSwipePreferred(inAllAppsMode || searchActive);
         }
@@ -1573,7 +1540,8 @@ public class MainActivity extends Activity {
             boolean go = actionId == EditorInfo.IME_ACTION_GO
                     || (event != null && event.getKeyCode() == KeyEvent.KEYCODE_ENTER && event.getAction() == KeyEvent.ACTION_DOWN);
             if (go) {
-                for (StreamRow r : streamRows) {
+                for (int i = streamRows.size() - 1; i >= 0; i--) {
+                    StreamRow r = streamRows.get(i);
                     if (r.app != null) {
                         launchApp(r.app);
                         return true;
@@ -1590,9 +1558,10 @@ public class MainActivity extends Activity {
         if (!searchActive) {
             searchActive = true;
             searchBarCard.setVisibility(View.VISIBLE);
+            searchBarCard.bringToFront();
             updateFirstPageExtrasVisibility();
             rebuildStreamRows();
-            streamListView.setSelection(0);
+            if (!streamRows.isEmpty()) streamListView.setSelection(streamRows.size() - 1);
             animateStreamListTransition();
         }
         searchInput.requestFocus();
@@ -2436,13 +2405,14 @@ public class MainActivity extends Activity {
         return super.dispatchTouchEvent(ev);
     }
 
-    // ---------- v2.6.0 单手右滑直达 Pop-up ----------
+    // ---------- v2.7.0 单手右滑直达 Pop-up（无底栏大胶囊干扰，过阈值单次微震确认） ----------
     private boolean rightRowSwiping = false;
+    private boolean rightSwipeThresholdTicked = false;
     private int touchSlopPx = 0;
 
     /**
      * 列表项右滑手势识别：dx > touchSlop 且 dx > |dy|*2.0（极角隔离，避开纵向滚动与系统边缘手势）。
-     * 触发后接管事件流：列表项以 min(dx*0.4, 48dp) 跟手位移，松手 dx > 56dp 呼出 Pop-up，否则平滑复位。
+     * 触发后接管事件流：列表项以 min(dx*0.4, 48dp) 跟手位移，跨越 56dp 触发一次轻脆微震，松手呼出 Pop-up。
      *
      * @return true 表示事件已被右滑手势消费（调用方应直接返回 true）
      */
@@ -2457,6 +2427,7 @@ public class MainActivity extends Activity {
             if (touchSlopPx <= 0) touchSlopPx = ViewConfiguration.get(this).getScaledTouchSlop();
             if (!(dx > touchSlopPx && dx > Math.abs(dy) * 2.0f)) return false;
             rightRowSwiping = true;
+            rightSwipeThresholdTicked = false;
             rowSwiping = true;
             if (streamListView != null) streamListView.requestDisallowInterceptTouchEvent(true);
             MotionEvent cancel = MotionEvent.obtain(event);
@@ -2467,11 +2438,13 @@ public class MainActivity extends Activity {
         }
 
         if (action == MotionEvent.ACTION_MOVE) {
-            itemView.setTranslationX(Math.max(0f, Math.min(dx * 0.4f, dp(48))));
-            if (swipeHintPill != null && dx > dp(16)) {
-                swipeHintPill.setText(dx > dp(56) ? "⚙  松手展开 · 通知 · 快捷方式" : "⚙  继续右滑展开");
-                swipeHintPill.setVisibility(View.VISIBLE);
-                swipeHintPill.setAlpha(Math.min(1f, (dx - dp(16)) / dp(40)));
+            itemView.setTranslationX(Math.max(0f, Math.min(dx * 0.42f, dp(48))));
+            if (!rightSwipeThresholdTicked && dx > dp(56)) {
+                rightSwipeThresholdTicked = true;
+                itemView.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK,
+                        HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING);
+            } else if (rightSwipeThresholdTicked && dx < dp(46)) {
+                rightSwipeThresholdTicked = false;
             }
             return true;
         }
@@ -2480,6 +2453,7 @@ public class MainActivity extends Activity {
             if (swipeHintPill != null) swipeHintPill.setVisibility(View.GONE);
             boolean trigger = action == MotionEvent.ACTION_UP && dx > dp(56);
             rightRowSwiping = false;
+            rightSwipeThresholdTicked = false;
             rowSwiping = false;
             swipedRowPos = -1;
             if (trigger) {
@@ -2491,14 +2465,27 @@ public class MainActivity extends Activity {
         return true;
     }
 
-    // ---------- v2.6.0 锚点跟随 Pop-up 浮层（通知摘要 / 快捷回复 / 动态快捷方式） ----------
+    // ---------- v2.7.0 锚点跟随 Pop-up 浮层（API 31+ 背景模糊 / 软键盘自动避让 / 通知与快捷方式 / 文件夹统一体系） ----------
     private FrameLayout workspaceRoot;
     private FrameLayout appPopupScrim;
+
+    private void applyPopupBackdropBlur(boolean enable) {
+        if (Build.VERSION.SDK_INT < 31) return;
+        try {
+            android.graphics.RenderEffect fx = enable
+                    ? android.graphics.RenderEffect.createBlurEffect(
+                            12f * dpUnit, 12f * dpUnit, android.graphics.Shader.TileMode.CLAMP)
+                    : null;
+            if (workspaceMainColumn != null) workspaceMainColumn.setRenderEffect(fx);
+            if (backdropView != null) backdropView.setRenderEffect(fx);
+        } catch (Throwable ignored) {}
+    }
 
     private void dismissAppPopupCard(boolean animate) {
         final FrameLayout scrim = appPopupScrim;
         if (scrim == null) return;
         appPopupScrim = null;
+        applyPopupBackdropBlur(false);
         hideSoftKeyboard();
         final Runnable remove = () -> {
             ViewGroup p = (ViewGroup) scrim.getParent();
@@ -2656,7 +2643,7 @@ public class MainActivity extends Activity {
         scrim.setClickable(true);
         scrim.setOnClickListener(v -> dismissAppPopupCard(true));
 
-        // 几何锚定：横向左缘 = 图标中心 + 64dp，右侧距屏幕边缘 16dp；纵向对齐列表项，靠近底部自动上翻
+        // 几何锚定：左缘自然贴合应用文本区，右侧距屏幕边缘 16dp；纵向对齐列表项，靠近底部自动上翻，且随软键盘自动避让
         int rootW = root.getWidth() > 0 ? root.getWidth() : getResources().getDisplayMetrics().widthPixels;
         int rootH = root.getHeight() > 0 ? root.getHeight() : getResources().getDisplayMetrics().heightPixels;
         int[] rootLoc = new int[2];
@@ -2673,13 +2660,13 @@ public class MainActivity extends Activity {
                     + iconView.getLeft() + iconView.getWidth() / 2;
         }
 
-        int minW = dp(236), maxW = dp(320), margin = dp(16);
-        int left = iconCenterX + dp(64);
+        int minW = dp(248), maxW = dp(328), margin = dp(16);
+        int left = iconCenterX + dp(32);
         if (rootW - left - margin < minW) left = rootW - margin - minW;
-        left = Math.max(dp(8), left);
+        left = Math.max(dp(12), left);
         int width = Math.max(minW, Math.min(maxW, rootW - left - margin));
 
-        int topInset = 0, botInset = 0;
+        int topInset = currentTopInsetPx, botInset = currentNavBottomPx;
         try {
             android.view.WindowInsets wi = root.getRootWindowInsets();
             if (wi != null) {
@@ -2691,11 +2678,189 @@ public class MainActivity extends Activity {
         int availBottom = rootH - botInset - dp(12);
         card.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
                 View.MeasureSpec.makeMeasureSpec(Math.max(dp(120), availBottom - availTop), View.MeasureSpec.AT_MOST));
-        int cardH = card.getMeasuredHeight();
+        final int cardH = card.getMeasuredHeight();
         int top = anchorTop - dp(6);
         if (top + cardH > availBottom) {
             top = anchorTop + anchorH + dp(6) - cardH; // 靠近底部：向上翻转展开
         }
+        final int finalTop = Math.max(availTop, Math.min(top, availBottom - cardH));
+
+        FrameLayout.LayoutParams clp = new FrameLayout.LayoutParams(width, cardH);
+        clp.leftMargin = left;
+        clp.topMargin = finalTop;
+        scrim.addView(card, clp);
+
+        // 软键盘弹出（点击内联快捷回复）时自动上移卡片，避免输入框被键盘遮挡
+        final int safeTopLimit = availTop;
+        final int totalRootH = rootH;
+        scrim.setOnApplyWindowInsetsListener((sv, insets) -> {
+            int imeBot = 0;
+            if (Build.VERSION.SDK_INT >= 30) {
+                try {
+                    imeBot = insets.getInsets(android.view.WindowInsets.Type.ime()).bottom;
+                } catch (Throwable ignored) {}
+            } else {
+                imeBot = insets.getSystemWindowInsetBottom();
+            }
+            int cardBottom = finalTop + cardH;
+            int visibleBottom = totalRootH - imeBot - dp(12);
+            float shiftY = 0f;
+            if (imeBot > dp(100) && cardBottom > visibleBottom) {
+                shiftY = -Math.min(cardBottom - visibleBottom, Math.max(0, finalTop - safeTopLimit));
+            }
+            card.animate().translationY(shiftY).setDuration(150).start();
+            return insets;
+        });
+
+        root.addView(scrim, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        appPopupScrim = scrim;
+        applyPopupBackdropBlur(true);
+
+        // 入场：从锚点左缘轻微内推 + 缩放 + 渐显
+        card.setPivotX(0f);
+        card.setPivotY(Math.max(0f, Math.min(cardH, anchorTop + anchorH * 0.5f - finalTop)));
+        card.setScaleX(0.92f);
+        card.setScaleY(0.92f);
+        card.setTranslationX(-dp(12));
+        card.setAlpha(0f);
+        scrim.setAlpha(0f);
+        scrim.animate().alpha(1f).setDuration(150).start();
+        card.animate().alpha(1f).scaleX(1f).scaleY(1f).translationX(0f).setDuration(180)
+                .setInterpolator(new android.view.animation.DecelerateInterpolator(1.6f)).start();
+    }
+
+    /** 原生 Niagara 风格文件夹锚点 Pop-up：原地展开带应用图标与未读点的微卡片。 */
+    private void openFolderPopup(final View anchorView, final int folderIdx) {
+        if (anchorView == null || workspaceRoot == null) {
+            openFolderSheet(folderIdx);
+            return;
+        }
+        final JSONObject fo = getFoldersArray().optJSONObject(folderIdx);
+        if (fo == null) return;
+        dismissAppPopupCard(false);
+
+        final FrameLayout root = workspaceRoot;
+        final LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(14), dp(12), dp(14), dp(10));
+
+        LinearLayout hdr = new LinearLayout(this);
+        hdr.setGravity(Gravity.CENTER_VERTICAL);
+        hdr.setPadding(0, 0, 0, dp(6));
+        TextView title = makeText(fo.optString("name", "文件夹"), 15.5f, theme.textPrimary, true);
+        title.setSingleLine(true);
+        title.setEllipsize(TextUtils.TruncateAt.END);
+        hdr.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        TextView editBtn = makeText("管理", 12.2f, theme.accent, true);
+        editBtn.setPadding(dp(10), dp(4), dp(2), dp(4));
+        editBtn.setOnClickListener(v -> {
+            dismissAppPopupCard(false);
+            promptEditFolder(folderIdx);
+        });
+        hdr.addView(editBtn);
+        content.addView(hdr);
+
+        JSONArray apps = fo.optJSONArray("apps");
+        int count = 0;
+        if (apps != null) {
+            for (int i = 0; i < apps.length(); i++) {
+                final AppEntry a = findAppByKey(apps.optString(i));
+                if (a == null) continue;
+                count++;
+                LinearLayout aRow = new LinearLayout(this);
+                aRow.setOrientation(LinearLayout.HORIZONTAL);
+                aRow.setGravity(Gravity.CENTER_VERTICAL);
+                aRow.setPadding(dp(2), dp(7), dp(4), dp(7));
+
+                ImageView aiv = new ImageView(this);
+                aiv.setImageDrawable(getShapedIcon(a));
+                LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(dp(32), dp(32));
+                ilp.rightMargin = dp(12);
+                aRow.addView(aiv, ilp);
+
+                LinearLayout col = new LinearLayout(this);
+                col.setOrientation(LinearLayout.VERTICAL);
+                TextView nameTv = makeText(a.label, 14.2f, theme.textPrimary, false);
+                nameTv.setSingleLine(true);
+                nameTv.setEllipsize(TextUtils.TruncateAt.END);
+                col.addView(nameTv);
+
+                String pkg = a.component != null ? a.component.getPackageName() : "";
+                NotificationHubService.NotifItem notif = prefs.getBoolean(K_INLINE_NOTIF, true)
+                        ? NotificationHubService.latestByPkg.get(pkg) : null;
+                if (notif != null) {
+                    String preview = (notif.title.isEmpty() ? "" : notif.title + "：") + notif.text;
+                    TextView subTv = makeText(preview, 11.4f, theme.textSecondary, false);
+                    subTv.setSingleLine(true);
+                    subTv.setEllipsize(TextUtils.TruncateAt.END);
+                    col.addView(subTv);
+                }
+                aRow.addView(col, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+                if (notif == null && NotificationHubService.activePackages.contains(pkg)) {
+                    View dot = new View(this);
+                    GradientDrawable dbg = new GradientDrawable();
+                    dbg.setShape(GradientDrawable.OVAL);
+                    dbg.setColor(theme.accent);
+                    dot.setBackground(dbg);
+                    LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(dp(6), dp(6));
+                    dlp.leftMargin = dp(8);
+                    aRow.addView(dot, dlp);
+                }
+
+                aRow.setOnClickListener(v -> {
+                    dismissAppPopupCard(true);
+                    launchApp(a, v);
+                });
+                aRow.setOnLongClickListener(v -> {
+                    dismissAppPopupCard(false);
+                    showAppActionSheet(a);
+                    return true;
+                });
+                content.addView(aRow);
+            }
+        }
+        if (count == 0) {
+            TextView empty = makeText("文件夹为空，点击右上角「管理」添加应用", 12.5f, theme.textSecondary, false);
+            empty.setPadding(0, dp(8), 0, dp(8));
+            content.addView(empty);
+        }
+
+        final ScrollView card = new ScrollView(this);
+        card.setVerticalScrollBarEnabled(false);
+        card.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        card.setBackground(popupCardBackground());
+        card.setClipToOutline(true);
+        card.setOutlineProvider(android.view.ViewOutlineProvider.BACKGROUND);
+        card.setClickable(true);
+        card.addView(content, new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        final FrameLayout scrim = new FrameLayout(this);
+        scrim.setBackgroundColor(theme.isLight ? 0x14000000 : 0x2A000000);
+        scrim.setClickable(true);
+        scrim.setOnClickListener(v -> dismissAppPopupCard(true));
+
+        int rootW = root.getWidth() > 0 ? root.getWidth() : getResources().getDisplayMetrics().widthPixels;
+        int rootH = root.getHeight() > 0 ? root.getHeight() : getResources().getDisplayMetrics().heightPixels;
+        int[] rootLoc = new int[2];
+        int[] aLoc = new int[2];
+        root.getLocationOnScreen(rootLoc);
+        anchorView.getLocationOnScreen(aLoc);
+        int anchorTop = aLoc[1] - rootLoc[1];
+        int anchorH = Math.max(anchorView.getHeight(), dp(44));
+
+        int margin = dp(16);
+        int width = Math.max(dp(248), Math.min(dp(320), rootW - dp(64)));
+        int left = Math.max(dp(18), Math.min(rootW - margin - width, dp(42)));
+        int availTop = currentTopInsetPx + dp(12);
+        int availBottom = rootH - currentNavBottomPx - dp(16);
+        card.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(Math.max(dp(120), availBottom - availTop), View.MeasureSpec.AT_MOST));
+        int cardH = card.getMeasuredHeight();
+        int top = anchorTop - dp(6);
+        if (top + cardH > availBottom) top = anchorTop + anchorH + dp(6) - cardH;
         top = Math.max(availTop, Math.min(top, availBottom - cardH));
 
         FrameLayout.LayoutParams clp = new FrameLayout.LayoutParams(width, cardH);
@@ -2705,13 +2870,13 @@ public class MainActivity extends Activity {
         root.addView(scrim, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         appPopupScrim = scrim;
+        applyPopupBackdropBlur(true);
 
-        // 入场：从锚点左缘轻微内推 + 缩放 + 渐显
         card.setPivotX(0f);
         card.setPivotY(Math.max(0f, Math.min(cardH, anchorTop + anchorH * 0.5f - top)));
         card.setScaleX(0.92f);
         card.setScaleY(0.92f);
-        card.setTranslationX(-dp(12));
+        card.setTranslationX(-dp(10));
         card.setAlpha(0f);
         scrim.setAlpha(0f);
         scrim.animate().alpha(1f).setDuration(150).start();
@@ -3443,28 +3608,13 @@ public class MainActivity extends Activity {
 
         if (searchActive) {
             if (!query.isEmpty()) {
+                // v2.7.0 贴底单手搜索排序：最佳匹配与计算结果置于列表底端，紧邻底部搜索栏与大拇指
                 String calcOut = QuickCalcEngine.evaluateOrConvert(query);
-                if (calcOut != null) {
-                    streamRows.add(new StreamRow(StreamRow.TYPE_CALC_RESULT, calcOut, null));
+                String rawSearchText = searchInput == null ? "" : searchInput.getText().toString().trim();
+                if (!rawSearchText.isEmpty() && calcOut == null) {
+                    streamRows.add(new StreamRow(StreamRow.TYPE_WEB_SEARCH, rawSearchText, null));
                 }
                 String cleanQ = query.replace(" ", "");
-                final Map<AppEntry, Integer> rankMap = new HashMap<>();
-                List<AppEntry> matches = new ArrayList<>();
-                for (AppEntry a : allApps) {
-                    if (hiddenSet.contains(a.idKey)) continue;
-                    int rank = matchRank(a, cleanQ);
-                    if (rank >= 0) {
-                        rankMap.put(a, rank);
-                        matches.add(a);
-                    }
-                }
-                Collections.sort(matches, (x, y) -> rankMap.get(x) - rankMap.get(y));
-                for (AppEntry a : matches) {
-                    streamRows.add(new StreamRow(StreamRow.TYPE_ALL_APP, null, a));
-                }
-                if (virtualSettingsApp != null && matchRank(virtualSettingsApp, cleanQ) >= 0) {
-                    streamRows.add(new StreamRow(StreamRow.TYPE_ALL_APP, null, virtualSettingsApp));
-                }
                 // 匹配应用内快捷方式（如：扫一扫 / 付款码 / 乘车码）
                 if (cleanQ.length() >= 2 && !cachedShortcuts.isEmpty()) {
                     int scCount = 0;
@@ -3477,41 +3627,69 @@ public class MainActivity extends Activity {
                         }
                     }
                 }
-                // 网页搜索兜底项
-                String rawSearchText = searchInput == null ? "" : searchInput.getText().toString().trim();
-                if (!rawSearchText.isEmpty() && calcOut == null) {
-                    streamRows.add(new StreamRow(StreamRow.TYPE_WEB_SEARCH, rawSearchText, null));
-                }
-            } else {
-                // 搜索框刚打开尚未输入时，优先展示最近使用与常用应用，方便一键点开
-                Set<String> shown = new HashSet<>();
-                List<String> recents = getStringList(K_RECENT_KEYS);
-                if (!recents.isEmpty()) {
-                    streamRows.add(new StreamRow(StreamRow.TYPE_SECTION, "⚡ 最近使用", null));
-                    for (String rk : recents) {
-                        AppEntry a = byKey.get(rk);
-                        if (a != null && !hiddenSet.contains(rk) && shown.add(rk)) {
-                            streamRows.add(new StreamRow(StreamRow.TYPE_ALL_APP, null, a));
-                            if (shown.size() >= 5) break;
-                        }
+                final Map<AppEntry, Integer> rankMap = new HashMap<>();
+                List<AppEntry> matches = new ArrayList<>();
+                for (AppEntry a : allApps) {
+                    if (hiddenSet.contains(a.idKey)) continue;
+                    int rank = matchRank(a, cleanQ);
+                    if (rank >= 0) {
+                        rankMap.put(a, rank);
+                        matches.add(a);
                     }
                 }
-                streamRows.add(new StreamRow(StreamRow.TYPE_SECTION, "★ 常用与全部应用", null));
+                Collections.sort(matches, (x, y) -> rankMap.get(x) - rankMap.get(y));
+                if (virtualSettingsApp != null && matchRank(virtualSettingsApp, cleanQ) >= 0) {
+                    matches.add(virtualSettingsApp);
+                }
+                for (int i = matches.size() - 1; i >= 0; i--) {
+                    streamRows.add(new StreamRow(StreamRow.TYPE_ALL_APP, null, matches.get(i)));
+                }
+                if (calcOut != null) {
+                    streamRows.add(new StreamRow(StreamRow.TYPE_CALC_RESULT, calcOut, null));
+                }
+            } else {
+                // 搜索框刚打开尚未输入时，将最近使用置于最底部紧贴拇指，上方衔接常用与全部应用
+                Set<String> shown = new HashSet<>();
+                List<AppEntry> recentEntries = new ArrayList<>();
+                List<String> recents = getStringList(K_RECENT_KEYS);
+                for (String rk : recents) {
+                    AppEntry a = byKey.get(rk);
+                    if (a != null && !hiddenSet.contains(rk) && shown.add(rk)) {
+                        recentEntries.add(a);
+                        if (recentEntries.size() >= 5) break;
+                    }
+                }
+                List<AppEntry> otherEntries = new ArrayList<>();
                 for (String fk : getStringList(K_FAVS)) {
                     AppEntry a = byKey.get(fk);
                     if (a != null && !hiddenSet.contains(fk) && shown.add(fk)) {
-                        streamRows.add(new StreamRow(StreamRow.TYPE_ALL_APP, null, a));
+                        otherEntries.add(a);
                     }
                 }
                 for (AppEntry a : allApps) {
                     if (!hiddenSet.contains(a.idKey) && shown.add(a.idKey)) {
-                        streamRows.add(new StreamRow(StreamRow.TYPE_ALL_APP, null, a));
+                        otherEntries.add(a);
+                    }
+                }
+                if (!otherEntries.isEmpty()) {
+                    streamRows.add(new StreamRow(StreamRow.TYPE_SECTION, "★ 常用与全部应用", null));
+                    for (int i = otherEntries.size() - 1; i >= 0; i--) {
+                        streamRows.add(new StreamRow(StreamRow.TYPE_ALL_APP, null, otherEntries.get(i)));
+                    }
+                }
+                if (!recentEntries.isEmpty()) {
+                    streamRows.add(new StreamRow(StreamRow.TYPE_SECTION, "⚡ 最近使用", null));
+                    for (int i = recentEntries.size() - 1; i >= 0; i--) {
+                        streamRows.add(new StreamRow(StreamRow.TYPE_ALL_APP, null, recentEntries.get(i)));
                     }
                 }
             }
             rightWaveBar.setVisibility(View.GONE);
             leftGhostWaveBar.setVisibility(View.GONE);
             streamAdapter.notifyDataSetChanged();
+            if (!streamRows.isEmpty() && streamListView != null) {
+                streamListView.setSelection(streamRows.size() - 1);
+            }
             return;
         }
 
@@ -3795,7 +3973,19 @@ public class MainActivity extends Activity {
                 boolean showIcons = prefs.getBoolean(K_SHOW_ICONS, true);
                 iv.setVisibility(showIcons ? View.VISIBLE : View.GONE);
                 if (showIcons) {
-                    iv.setImageDrawable(IconPackManager.createFolderIcon(MainActivity.this, memberIcons, Math.max(88, dp(44)), theme));
+                    StringBuilder fk = new StringBuilder();
+                    fk.append(theme.isLight ? 'L' : 'D').append(':').append(prefs.getInt(K_ICON_SHAPE, 0))
+                            .append(':').append(prefs.getString(K_ICON_PACK, "")).append(':').append(row.folderIdx);
+                    for (int i = 0; i < Math.min(4, cnt); i++) {
+                        fk.append('|').append(appsArr.optString(i));
+                    }
+                    String cacheKey = fk.toString();
+                    Drawable cachedFolder = folderIconCache.get(cacheKey);
+                    if (cachedFolder == null) {
+                        cachedFolder = IconPackManager.createFolderIcon(MainActivity.this, memberIcons, Math.max(88, dp(44)), theme);
+                        folderIconCache.put(cacheKey, cachedFolder);
+                    }
+                    iv.setImageDrawable(cachedFolder);
                 }
                 t1.setText(row.text);
                 t1.setTextColor(theme.textPrimary);
@@ -3818,7 +4008,7 @@ public class MainActivity extends Activity {
                     rowView.setBackground(null);
                 }
                 final int fIdx = row.folderIdx;
-                rowView.setOnClickListener(v -> openFolderSheet(fIdx));
+                rowView.setOnClickListener(v -> openFolderPopup(v, fIdx));
                 rowView.setOnLongClickListener(v -> { promptEditFolder(fIdx); return true; });
                 return rowView;
             }
@@ -4034,9 +4224,16 @@ public class MainActivity extends Activity {
             boolean showIcons = prefs.getBoolean(K_SHOW_ICONS, true);
             int iconBaseDp = isFav ? 40 : 35; // 首页常用图标精致 40dp，视觉比例更协调
             int iconSize = dp(iconBaseDp * Math.min(textScale, 1.15f));
-            LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(iconSize, iconSize);
-            ilp.rightMargin = dp(isFav ? 15 : 13);
-            iconView.setLayoutParams(ilp);
+            int iconRightMargin = dp(isFav ? 15 : 13);
+            ViewGroup.LayoutParams curIlp = iconView.getLayoutParams();
+            if (!(curIlp instanceof LinearLayout.LayoutParams)
+                    || curIlp.width != iconSize
+                    || curIlp.height != iconSize
+                    || ((LinearLayout.LayoutParams) curIlp).rightMargin != iconRightMargin) {
+                LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(iconSize, iconSize);
+                ilp.rightMargin = iconRightMargin;
+                iconView.setLayoutParams(ilp);
+            }
             iconView.setImageDrawable(getShapedIcon(app));
             iconView.setVisibility(showIcons ? View.VISIBLE : View.GONE);
 
@@ -4075,10 +4272,10 @@ public class MainActivity extends Activity {
             accentRail.setVisibility(View.GONE);
 
             if (hasNotif) {
-                String extraCount = notifCount > 1 ? ("  · +" + (notifCount - 1) + "条") : "";
+                String extraCount = notifCount > 1 ? (" · +" + (notifCount - 1)) : "";
                 String summary = (notif.title.isEmpty() ? "" : notif.title + "：") + notif.text + extraCount;
                 subNotifView.setText(summary);
-                subNotifView.setTextColor(theme.accent);
+                subNotifView.setTextColor(theme.isLight ? 0xB8141824 : 0xCCE2E8F0);
                 subNotifView.setTypeface(typeface);
                 subNotifView.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp(11.8f));
                 subNotifView.setVisibility(View.VISIBLE);
@@ -4086,15 +4283,17 @@ public class MainActivity extends Activity {
                 subNotifView.setVisibility(View.GONE);
             }
 
-            unreadBadge.setVisibility(hasUnread ? View.VISIBLE : View.GONE);
+            // 已有内联通知摘要时不再重复叠加圆点，保持原生 Niagara 视觉克制
+            unreadBadge.setVisibility((hasUnread && !hasNotif) ? View.VISIBLE : View.GONE);
 
             float mul = getRowSpacingMultiplier();
-            if (useFavCards || (isFav && hasNotif)) {
+            if (useFavCards) {
                 cardRow.setBackground(hasNotif ? cachedFavCardNotif : cachedFavCardNormal);
                 int vPad = dp(6.5f * mul);
                 cardRow.setPadding(dp(10), vPad, dp(14), vPad);
                 outerWrap.setPadding(0, dp(2.2f * mul), dp(4), dp(2.2f * mul));
             } else {
+                // 无卡片模式下不因未读通知改变 padding/背景，确保所有常用应用图标绝对左对齐
                 cardRow.setBackground(null);
                 int vPad = dp((isFav ? 8.5f : 6.0f) * mul);
                 cardRow.setPadding(dp(2), vPad, dp(12), vPad);
@@ -4110,10 +4309,30 @@ public class MainActivity extends Activity {
         catch (Throwable t) { return new JSONObject(); }
     }
 
+    private String getCustomIconSpecCached(String idKey) {
+        if (customIconsCache == null) {
+            Map<String, String> map = new HashMap<>();
+            JSONObject obj = getCustomIconsJson();
+            for (Iterator<String> it = obj.keys(); it.hasNext(); ) {
+                String k = it.next();
+                String v = obj.optString(k, "");
+                if (!v.isEmpty()) map.put(k, v);
+            }
+            customIconsCache = map;
+        }
+        String val = customIconsCache.get(idKey);
+        return val != null ? val : "";
+    }
+
+    private void invalidateCustomIconsCache() {
+        customIconsCache = null;
+        folderIconCache.clear();
+    }
+
     Drawable getShapedIcon(AppEntry app) {
         int shape = Math.max(0, Math.min(ICON_SHAPES.length - 1, prefs.getInt(K_ICON_SHAPE, 0)));
         String activePack = prefs.getString(K_ICON_PACK, "");
-        String customSpec = getCustomIconsJson().optString(app.idKey, "");
+        String customSpec = getCustomIconSpecCached(app.idKey);
         int modeSignature = shape * 1000003 ^ activePack.hashCode() ^ customSpec.hashCode();
         if (app.shapedIcon != null && app.shapedMode == modeSignature) return app.shapedIcon;
         if (app.rawIcon == null) return app.shapedIcon;
@@ -4979,7 +5198,7 @@ public class MainActivity extends Activity {
                 return DENSITY_NAMES[idx];
             }
             @Override public String getCurrentCoinActionName() {
-                int idx = Math.max(0, Math.min(COIN_ACTIONS.length - 1, prefs.getInt(K_COIN_TAP_ACTION, 0)));
+                int idx = Math.max(0, Math.min(COIN_ACTIONS.length - 1, prefs.getInt(K_COIN_TAP_ACTION, 1)));
                 return COIN_ACTIONS[idx];
             }
             @Override public int getPinnedWidgetCount() {
@@ -5011,6 +5230,7 @@ public class MainActivity extends Activity {
                 final int curShape = prefs.getInt(K_ICON_SHAPE, 0);
                 showSingleChoiceDialog("选择图标造型", ICON_SHAPES, curShape, idx -> {
                     prefs.edit().putInt(K_ICON_SHAPE, idx).apply();
+                    folderIconCache.clear();
                     loadInstalledAppsAsync();
                 });
             }
@@ -5061,6 +5281,13 @@ public class MainActivity extends Activity {
                 prefs.edit().putBoolean(K_STATUS_BAR_FULL, full).apply();
                 if (heroStatusBar != null) heroStatusBar.setFullMode(full);
             }
+            @Override public void onHeroHighContrastChanged(boolean highContrast) {
+                prefs.edit().putBoolean(K_HERO_HIGH_CONTRAST, highContrast).apply();
+                if (heroStatusBar != null) {
+                    heroStatusBar.setAestheticStyle(highContrast
+                            ? HeroStatusBarView.STYLE_HIGH_CONTRAST : HeroStatusBarView.STYLE_AIRY);
+                }
+            }
             @Override public void onFavCardsChanged(boolean on) {
                 prefs.edit().putBoolean(K_FAV_CARDS, on).apply();
                 if (streamAdapter != null) streamAdapter.notifyDataSetChanged();
@@ -5074,6 +5301,11 @@ public class MainActivity extends Activity {
             }
             @Override public void onPullDownSearchChanged(boolean on) {
                 prefs.edit().putBoolean(K_PULL_DOWN_SEARCH, on).apply();
+            }
+            @Override public void onWaveIdleDotsChanged(boolean dots) {
+                prefs.edit().putBoolean(K_WAVE_IDLE_DOTS, dots).apply();
+                if (rightWaveBar != null) rightWaveBar.setIdleDotsMode(dots);
+                if (leftGhostWaveBar != null) leftGhostWaveBar.setIdleDotsMode(dots);
             }
             @Override public void onCoinLeftChanged(boolean left) {
                 prefs.edit().putBoolean(K_COIN_LEFT, left).apply();
@@ -5171,6 +5403,7 @@ public class MainActivity extends Activity {
             String chosen = pkgs[idx];
             prefs.edit().putString(K_ICON_PACK, chosen).apply();
             IconPackManager.loadPack(MainActivity.this, chosen);
+            folderIconCache.clear();
             loadInstalledAppsAsync();
             Toast.makeText(MainActivity.this, "已应用图标包：" + labels[idx].split("  \\(")[0], Toast.LENGTH_SHORT).show();
         });
@@ -5204,6 +5437,7 @@ public class MainActivity extends Activity {
                 JSONObject ci = getCustomIconsJson();
                 ci.remove(app.idKey);
                 prefs.edit().putString(K_CUSTOM_ICONS, ci.toString()).apply();
+                invalidateCustomIconsCache();
                 app.shapedIcon = null;
                 if (streamAdapter != null) streamAdapter.notifyDataSetChanged();
             } catch (Throwable ignored) {}
@@ -5215,6 +5449,7 @@ public class MainActivity extends Activity {
                     JSONObject ci = getCustomIconsJson();
                     ci.put(app.idKey, packPkg + "|" + dName);
                     prefs.edit().putString(K_CUSTOM_ICONS, ci.toString()).apply();
+                    invalidateCustomIconsCache();
                     app.shapedIcon = null;
                     if (streamAdapter != null) streamAdapter.notifyDataSetChanged();
                     Toast.makeText(MainActivity.this, "已更换图标：" + dName, Toast.LENGTH_SHORT).show();
@@ -5280,7 +5515,7 @@ public class MainActivity extends Activity {
     }
 
     private void showCoinActionPickerDialog() {
-        int cur = Math.max(0, Math.min(COIN_ACTIONS.length - 1, prefs.getInt(K_COIN_TAP_ACTION, 0)));
+        int cur = Math.max(0, Math.min(COIN_ACTIONS.length - 1, prefs.getInt(K_COIN_TAP_ACTION, 1)));
         showSingleChoiceDialog("🔘 悬浮按钮轻点动作", COIN_ACTIONS, cur, idx -> {
             prefs.edit().putInt(K_COIN_TAP_ACTION, idx).apply();
             applyCoinButtonConfig();
@@ -5724,6 +5959,7 @@ public class MainActivity extends Activity {
 
     private void saveFoldersArray(JSONArray arr) {
         prefs.edit().putString(K_FOLDERS, arr.toString()).apply();
+        folderIconCache.clear();
         rebuildFolderCapsules();
         rebuildStreamRows();
     }
@@ -5982,8 +6218,6 @@ public class MainActivity extends Activity {
 
     private void updateMediaCardUi() {
         uiHandler.removeCallbacks(mediaProgressTicker);
-        uiHandler.removeCallbacks(refreshNotificationsTask);
-        uiHandler.removeCallbacks(clearHighlightTask);
         if (mediaWaveCard == null) return;
         MediaMetadata meta = activeMediaController == null ? null : activeMediaController.getMetadata();
         if (meta == null || TextUtils.isEmpty(meta.getString(MediaMetadata.METADATA_KEY_TITLE))) {

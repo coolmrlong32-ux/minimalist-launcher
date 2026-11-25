@@ -59,7 +59,7 @@ final class AuroraBackdropView extends View {
     private float touchGlowStrength = 0f;
     /** 搜索过渡进度：0.0（首屏）→ 1.0（完全搜索态）。 */
     private float searchProgress = 0f;
-    private static final float SEARCH_MIN_SCALE = 0.96f;
+    private static final float SEARCH_BASE_SCALE = 1.045f;
     private static final float SEARCH_MAX_DIM = 0.35f;
     private final long t0 = SystemClock.uptimeMillis();
     private long resumeFreezeUntilMs = 0L;
@@ -155,14 +155,30 @@ final class AuroraBackdropView extends View {
         }
     }
 
+    private static boolean zoomMethodChecked = false;
+    private static java.lang.reflect.Method wallpaperZoomOutMethod = null;
+
     /**
-     * 搜索呼出景深联动：壁纸场景平滑微缩放 1.0 → 0.96，并叠加最高 35% 的压暗遮罩。
-     * 遮罩始终铺满屏幕（不随缩放），系统壁纸主题仅执行压暗（系统壁纸由 WallpaperManager 托管，无法被应用缩放）。
+     * 搜索呼出景深联动：自绘壁纸由常态预放大 1.045 → 1.0 平滑退后（单次绘制零重影、不露黑边），
+     * 并叠加最高 35% 压暗遮罩；系统壁纸模式在 Android 11+ (API 30+) 安全尝试原生 setWallpaperZoomOut。
      */
     void setSearchTransitionProgress(float progress) {
         float p = Math.max(0f, Math.min(1f, progress));
         if (Math.abs(p - searchProgress) < 0.0005f) return;
         searchProgress = p;
+        if (theme != null && theme.useSystemWallpaper && android.os.Build.VERSION.SDK_INT >= 30 && getWindowToken() != null) {
+            try {
+                if (!zoomMethodChecked) {
+                    zoomMethodChecked = true;
+                    wallpaperZoomOutMethod = WallpaperManager.class.getMethod(
+                            "setWallpaperZoomOut", android.os.IBinder.class, float.class);
+                }
+                if (wallpaperZoomOutMethod != null) {
+                    wallpaperZoomOutMethod.invoke(WallpaperManager.getInstance(getContext()),
+                            getWindowToken(), p * 0.65f);
+                }
+            } catch (Throwable ignored) {}
+        }
         invalidate();
     }
 
@@ -221,15 +237,11 @@ final class AuroraBackdropView extends View {
             int styleIdx = Math.max(0, Math.min(5, theme.presetIdx));
             Bitmap scene = ensureDesktopSceneBitmap(w, h, styleIdx, phase);
             dstRect.set(0, 0, w, h);
-            // 先铺满原尺寸底图，再在其上绘制微缩放场景，避免缩放后四周露出空白
+            // 常态预放大 1.045 → 搜索态缩回 1.0：单次绘制实现平滑后退景深，彻底消除双层重影与露边
+            float sc = SEARCH_BASE_SCALE - (SEARCH_BASE_SCALE - 1.0f) * searchProgress;
+            int sceneSave = canvas.save();
+            canvas.scale(sc, sc, w * 0.5f, h * 0.5f);
             canvas.drawBitmap(scene, null, dstRect, bmpPaint);
-            int sceneSave = -1;
-            if (searchProgress > 0.001f) {
-                float sc = 1.0f - (1.0f - SEARCH_MIN_SCALE) * searchProgress;
-                sceneSave = canvas.save();
-                canvas.scale(sc, sc, w * 0.5f, h * 0.5f);
-                canvas.drawBitmap(scene, null, dstRect, bmpPaint);
-            }
 
             // 叠加轻微流动极光光晕，让桌面保持柔和生命力
             if (unitOrbShaders != null && unitOrbShaders.length > 0 && animateFlow) {
