@@ -44,11 +44,12 @@ final class HeroStatusBarView extends LinearLayout {
     private final float dp;
     private final AuroraTheme theme;
     private final Typeface typeface;
-    private final float textScale;
+    private float textScale;
 
     private final WeatherGlyphView weatherIcon;
     private final TextView weatherLabel;
     private final View gap1;
+    private final LinearLayout batterySeg;
     private final BatteryGlyphView batteryIcon;
     private final TextView batteryLabel;
     private final View gap2;
@@ -63,6 +64,7 @@ final class HeroStatusBarView extends LinearLayout {
     private int aestheticStyle = STYLE_AIRY;
     private String lastWeatherRaw = "";
     private boolean fullMode = false;
+    private boolean smartBatteryOnly = true;
     private int lastBatteryPct = 80;
     private boolean lastCharging = false;
     private float lastBatteryTempC = 32.0f;
@@ -80,6 +82,13 @@ final class HeroStatusBarView extends LinearLayout {
         setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
         setBackground(null);
         setPadding(dp(2), dp(2), dp(2), dp(2));
+        if (cb != null) {
+            setOnClickListener(v -> cb.onDeviceStatusClick());
+            setOnLongClickListener(v -> {
+                cb.onLongPress();
+                return true;
+            });
+        }
 
         // 1. 天气交互段
         LinearLayout weatherSeg = makeSegment(cb != null ? cb::onWeatherClick : null, cb != null ? cb::onLongPress : null);
@@ -95,8 +104,8 @@ final class HeroStatusBarView extends LinearLayout {
         gap1 = makeGap();
         addView(gap1, new LayoutParams(dp(GAP_DP), 1));
 
-        // 2. 电量交互段（点击打开 2x2 本机实时状态仪表盘）
-        LinearLayout batterySeg = makeSegment(cb != null ? cb::onDeviceStatusClick : null, cb != null ? cb::onLongPress : null);
+        // 2. 电量交互段（点击打开 2x2 本机实时状态仪表盘；原生极简态仅充电或低电 ≤20% 出现）
+        batterySeg = makeSegment(cb != null ? cb::onDeviceStatusClick : null, cb != null ? cb::onLongPress : null);
         batteryIcon = new BatteryGlyphView(ctx, theme);
         LayoutParams biLp = new LayoutParams(dp(22), dp(11));
         biLp.rightMargin = dp(5);
@@ -160,10 +169,33 @@ final class HeroStatusBarView extends LinearLayout {
         renderMetricsText();
     }
 
+    /** 原生 Niagara 按需电量：仅在充电或电量 ≤20% 时展示电池段（完整模式开启时始终展示）。 */
+    void setSmartBatteryOnly(boolean smartOnly) {
+        if (this.smartBatteryOnly == smartOnly) return;
+        this.smartBatteryOnly = smartOnly;
+        applyExtraVisibility();
+    }
+
+    void setCentered(boolean centered) {
+        setGravity(centered ? Gravity.CENTER : (Gravity.CENTER_VERTICAL | Gravity.START));
+    }
+
+    void setTextScale(float scale) {
+        this.textScale = scale;
+        weatherLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.6f * textScale);
+        batteryLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.6f * textScale);
+        extraLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.0f * textScale);
+    }
+
     private void applyExtraVisibility() {
-        int vis = fullMode ? View.VISIBLE : View.GONE;
-        gap2.setVisibility(vis);
-        ((View) extraLabel.getParent()).setVisibility(vis);
+        boolean showBattery = fullMode || !smartBatteryOnly || lastCharging || lastBatteryPct <= 20;
+        int batVis = showBattery ? View.VISIBLE : View.GONE;
+        gap1.setVisibility(batVis);
+        batterySeg.setVisibility(batVis);
+
+        int extraVis = fullMode ? View.VISIBLE : View.GONE;
+        gap2.setVisibility(extraVis);
+        ((View) extraLabel.getParent()).setVisibility(extraVis);
     }
 
     private int dp(float v) {
@@ -266,6 +298,7 @@ final class HeroStatusBarView extends LinearLayout {
         this.lastBatteryTempC = batteryTempC;
         this.lastRamAvailGb = ramAvailGb;
         batteryIcon.setBattery(batteryPct, charging);
+        applyExtraVisibility();
         renderMetricsText();
     }
 

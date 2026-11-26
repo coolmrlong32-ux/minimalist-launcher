@@ -56,7 +56,7 @@ final class NiagaraWaveView extends View {
     }
 
     /** 高斯波峰最大横向偏移 (dp) 与标准差 σ (dp)。 */
-    private static final float MAX_WAVE_PEAK_DP = 52f;
+    private static final float MAX_WAVE_PEAK_DP = 46f;
     private static final float WAVE_SIGMA_DP = 48f;
     /** 系统手势排除区：跟随时触点上下各 90dp（总高 180dp ≤ 系统 200dp 上限），常驻区 160dp。 */
     private static final float EXCLUSION_TRACK_HALF_DP = 90f;
@@ -65,7 +65,7 @@ final class NiagaraWaveView extends View {
     /** 触觉防抖：相邻两次微震的最小间隔。 */
     private static final long HAPTIC_MIN_INTERVAL_MS = 12L;
 
-    private final String symbols;
+    private String symbols;
     private final float dp;
     private final Paint letterPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint dotPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -81,6 +81,7 @@ final class NiagaraWaveView extends View {
     private boolean ghostEdgeTrigger = false;
     private boolean alignLeft = true;
     private boolean backSwipePreferred = false;
+    private boolean pullLaunchEnabled = true;
     private NiagaraWaveView delegateTarget;
     private NiagaraWaveView sourceGhostBar;
     private Listener listener;
@@ -130,11 +131,34 @@ final class NiagaraWaveView extends View {
 
     NiagaraWaveView(Context ctx, String symbols) {
         super(ctx);
-        this.symbols = symbols;
+        this.symbols = (symbols == null || symbols.isEmpty()) ? "★" : symbols;
         this.dp = ctx.getResources().getDisplayMetrics().density;
         letterPaint.setTextAlign(Paint.Align.CENTER);
         crestTextPaint.setTextAlign(Paint.Align.CENTER);
         setLayerType(LAYER_TYPE_HARDWARE, null);
+    }
+
+    /** 动态更新自适应字母表序列（如仅包含已安装应用实际存在的首字母）。 */
+    void setSymbols(String activeSymbols) {
+        String next = (activeSymbols == null || activeSymbols.isEmpty()) ? "★" : activeSymbols;
+        if (next.equals(this.symbols)) return;
+        this.symbols = next;
+        if (activeIdx >= this.symbols.length()) {
+            activeIdx = this.symbols.length() - 1;
+        }
+        invalidate();
+    }
+
+    String getSymbols() {
+        return symbols;
+    }
+
+    void setPullLaunchEnabled(boolean enabled) {
+        this.pullLaunchEnabled = enabled;
+        if (!enabled && pullArmed) {
+            pullArmed = false;
+            animatePullExpand(0f);
+        }
     }
 
     void bindStyle(AuroraTheme theme, Typeface tf, boolean autoHide) {
@@ -161,6 +185,9 @@ final class NiagaraWaveView extends View {
     void setSilentAtRest(boolean silent) {
         if (this.silentAtRest != silent) {
             this.silentAtRest = silent;
+            if (Build.VERSION.SDK_INT >= 29 && isLaidOut()) {
+                updateSystemGestureExclusion(-1f, false);
+            }
             invalidate();
         }
     }
@@ -264,6 +291,10 @@ final class NiagaraWaveView extends View {
         int h = getHeight();
         int w = getWidth();
         if (w <= 0 || h <= 0) return;
+        if (silentAtRest && !isTracking) {
+            setSystemGestureExclusionRects(Collections.<Rect>emptyList());
+            return;
+        }
         int rw = Math.min(w, (int) railWidth());
         int span = (int) Math.min(h, (isTracking ? EXCLUSION_TRACK_HALF_DP * 2f : EXCLUSION_IDLE_HEIGHT_DP) * dp);
         int maxTop = Math.max(0, h - span);
@@ -312,7 +343,7 @@ final class NiagaraWaveView extends View {
 
     @Override
     protected void onDraw(Canvas canvas) {
-        if (ghostEdgeTrigger || theme == null) return;
+        if (ghostEdgeTrigger || theme == null || symbols == null || symbols.isEmpty()) return;
         if ((autoHideIdle || silentAtRest) && waveStrength <= 0.01f) return;
 
         int w = getWidth(), h = getHeight();
@@ -341,7 +372,7 @@ final class NiagaraWaveView extends View {
         }
 
         float sigma = WAVE_SIGMA_DP * dp;
-        float extraPull = Math.min(24f * dp, Math.max(0f, pullDepthPx - railWidth()) * 0.28f);
+        float extraPull = Math.min(20f * dp, Math.max(0f, pullDepthPx - railWidth()) * 0.24f);
         float maxShiftPx = (MAX_WAVE_PEAK_DP * dp + extraPull) * waveStrength;
         boolean waving = waveStrength > 0.01f && smoothY >= 0;
 
@@ -355,7 +386,7 @@ final class NiagaraWaveView extends View {
             float factor = waving ? calculateGaussianFactor(drawY, smoothY, sigma) : 0f;
             float focus = Math.min(1f, factor * waveStrength);
             float drawX = baseX + dir * maxShiftPx * factor;
-            boolean isActive = (i == activeIdx && waveStrength > 0.12f);
+            boolean isActive = (i == activeIdx && waveStrength > 0.10f);
 
             boolean hasApp = ch == '★' || availableLetters.contains(ch);
 
@@ -379,66 +410,73 @@ final class NiagaraWaveView extends View {
                 int alpha = waveStrength > 0.1f ? 0xEE000000 : (theme.isLight ? 0xCC000000 : 0xB8000000);
                 color = (theme.textPrimary & 0x00FFFFFF) | alpha;
             } else {
-                color = (theme.textSecondary & 0x00FFFFFF) | (waveStrength > 0.1f ? 0x66000000 : 0x34000000);
+                color = (theme.textSecondary & 0x00FFFFFF) | (waveStrength > 0.1f ? 0x58000000 : 0x30000000);
             }
-            // 焦点字母 100% 不透明，远端字母随波浪强度衰减至 45%
+            // 原生 Niagara 纯字母流体涌出：焦点字母沿高斯曲线顺滑放大至 1.85x + 主题高亮 + 微投影，无大圆球遮挡
             float alphaMul = (1f - 0.55f * waveStrength * (1f - factor)) * letterVis;
             letterPaint.setColor(color);
             letterPaint.setAlpha(Math.round(((color >>> 24) & 0xFF) * Math.max(0f, Math.min(1f, alphaMul))));
-            letterPaint.setTextSize(10.2f * dp * (1f + 0.65f * focus));
+            letterPaint.setTextSize(10.5f * dp * (1f + 0.85f * focus));
             letterPaint.setTypeface(isActive ? Typeface.create(typeface, Typeface.BOLD) : typeface);
+            if (isActive) {
+                letterPaint.setShadowLayer(3.2f * dp, 0f, 1.0f * dp, theme.isLight ? 0x24000000 : 0x55000000);
+            } else {
+                letterPaint.clearShadowLayer();
+            }
 
             float baseline = drawY - (letterPaint.descent() + letterPaint.ascent()) * 0.5f;
             canvas.drawText(String.valueOf(ch), drawX, baseline, letterPaint);
         }
+        letterPaint.clearShadowLayer();
 
-        if (activeIdx >= 0 && waveStrength > 0.08f && smoothY >= 0) {
+        // 仅在内拉直达触发时展开轻盈的「直达应用名」提示胶囊（去 Emoji）
+        if (pullLaunchEnabled && pullExpandFrac > 0.02f && activeIdx >= 0 && activeIdx < symbols.length()
+                && waveStrength > 0.08f && smoothY >= 0) {
             char ch = symbols.charAt(activeIdx);
-            float badgeScale = Math.min(1f, waveStrength * 1.12f);
-            float activeDrawY = slot * activeIdx + slot * 0.5f;
-            float activeDrawX = baseX + dir * maxShiftPx * calculateGaussianFactor(activeDrawY, smoothY, sigma);
-            float circleR = 16.5f * dp * badgeScale;
-            float circleCx = activeDrawX + dir * 28f * dp * badgeScale;
-            float circleCy = Math.max(circleR + 8f * dp, Math.min(h - circleR - 8f * dp, smoothY - 2f * dp));
-
-            crestCirclePaint.setColor(pullArmed ? theme.accent : theme.accentBubble);
-            crestCirclePaint.setShadowLayer(4.5f * dp, 0f, 1.8f * dp, 0x28000000);
-
             String previewApp = topAppPreview.get(ch);
-            if (pullExpandFrac > 0.02f && previewApp != null && !previewApp.isEmpty()) {
-                String launchLabel = "⚡ " + previewApp;
-                crestTextPaint.setTextSize(13.0f * dp);
+            if (previewApp != null && !previewApp.isEmpty()) {
+                float activeDrawY = slot * activeIdx + slot * 0.5f;
+                float activeDrawX = baseX + dir * maxShiftPx * calculateGaussianFactor(activeDrawY, smoothY, sigma);
+                float pillH = 30f * dp;
+                float halfH = pillH * 0.5f;
+                float anchorX = activeDrawX + dir * 20f * dp;
+                float cy = Math.max(halfH + 8f * dp, Math.min(h - halfH - 8f * dp, smoothY - 2f * dp));
+
+                String launchLabel = "→ " + previewApp;
+                crestTextPaint.setTextSize(12.8f * dp);
                 crestTextPaint.setTypeface(Typeface.create(typeface, Typeface.BOLD));
                 float tw = crestTextPaint.measureText(launchLabel);
-                float fullPillW = Math.max(circleR * 2f, tw + 22f * dp);
-                float curW = circleR * 2f + (fullPillW - circleR * 2f) * pullExpandFrac;
+                float fullPillW = Math.max(pillH, Math.min(w - 58f * dp, tw + 22f * dp));
+                float curW = pillH + (fullPillW - pillH) * pullExpandFrac;
+
                 if (alignLeft) {
-                    pillRect.set(circleCx - circleR, circleCy - circleR, circleCx - circleR + curW, circleCy + circleR);
+                    float left = Math.min(w - curW - 8f * dp, anchorX);
+                    pillRect.set(left, cy - halfH, left + curW, cy + halfH);
                 } else {
-                    pillRect.set(circleCx - curW + circleR, circleCy - circleR, circleCx + circleR, circleCy + circleR);
+                    float right = Math.max(curW + 8f * dp, anchorX);
+                    pillRect.set(right - curW, cy - halfH, right, cy + halfH);
                 }
-                canvas.drawRoundRect(pillRect, circleR, circleR, crestCirclePaint);
-                crestTextPaint.setColor(0xFFFFFFFF);
-                crestTextPaint.setAlpha(Math.round(255f * pullExpandFrac));
-                if (pullExpandFrac > 0.45f) {
+
+                crestCirclePaint.setColor(theme.accent);
+                crestCirclePaint.setAlpha(Math.round(235f * pullExpandFrac));
+                crestCirclePaint.setShadowLayer(4f * dp, 0f, 1.5f * dp, 0x26000000);
+                canvas.drawRoundRect(pillRect, halfH, halfH, crestCirclePaint);
+                crestCirclePaint.setAlpha(255);
+
+                if (pullExpandFrac > 0.35f) {
+                    crestTextPaint.setColor(0xFFFFFFFF);
+                    crestTextPaint.setAlpha(Math.round(255f * Math.min(1f, (pullExpandFrac - 0.35f) / 0.5f)));
                     float by = pillRect.centerY() - (crestTextPaint.descent() + crestTextPaint.ascent()) * 0.5f;
                     canvas.drawText(launchLabel, pillRect.centerX(), by, crestTextPaint);
+                    crestTextPaint.setAlpha(255);
                 }
-                crestTextPaint.setAlpha(255);
-            } else {
-                canvas.drawCircle(circleCx, circleCy, circleR, crestCirclePaint);
-                crestTextPaint.setColor(0xFFFFFFFF);
-                crestTextPaint.setTextSize(15.0f * dp * badgeScale);
-                crestTextPaint.setTypeface(Typeface.create(typeface, Typeface.BOLD));
-                float by = circleCy - (crestTextPaint.descent() + crestTextPaint.ascent()) * 0.5f;
-                canvas.drawText(String.valueOf(ch), circleCx, by, crestTextPaint);
             }
         }
     }
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
-        if (SystemClock.uptimeMillis() < cooldownUntilMs) {
+        if (SystemClock.uptimeMillis() < cooldownUntilMs || symbols == null || symbols.isEmpty()) {
             return false;
         }
         int action = event.getActionMasked();
@@ -513,6 +551,7 @@ final class NiagaraWaveView extends View {
     }
 
     private void updateActiveLetterAndNotify(float y, float inwardDepthPx, boolean fromLeft) {
+        if (symbols == null || symbols.isEmpty()) return;
         touchY = Math.max(0f, Math.min(getHeight() - 1f, y));
         pullDepthPx = Math.max(0f, inwardDepthPx);
 
@@ -520,9 +559,11 @@ final class NiagaraWaveView extends View {
         int idx = (int) (refY / slotHeight());
         idx = Math.max(0, Math.min(symbols.length() - 1, idx));
 
-        boolean nowArmed = pullDepthPx >= pullThreshold()
-                && symbols.charAt(idx) != '★'
-                && topAppPreview.containsKey(symbols.charAt(idx));
+        char ch = symbols.charAt(idx);
+        boolean nowArmed = pullLaunchEnabled
+                && pullDepthPx >= pullThreshold()
+                && ch != '★'
+                && topAppPreview.containsKey(ch);
 
         if (idx != activeIdx) {
             activeIdx = idx;
@@ -530,7 +571,9 @@ final class NiagaraWaveView extends View {
                 pullArmed = nowArmed;
                 animatePullExpand(nowArmed ? 1f : 0f);
             }
-            performWaveHapticFeedback();
+            if (ch == '★' || availableLetters.contains(ch)) {
+                performWaveHapticFeedback();
+            }
         } else if (nowArmed != pullArmed) {
             pullArmed = nowArmed;
             animatePullExpand(nowArmed ? 1f : 0f);
@@ -554,7 +597,7 @@ final class NiagaraWaveView extends View {
     }
 
     boolean handleWaveMotion(int action, float y, float inwardDepthPx, boolean fromLeft) {
-        if (SystemClock.uptimeMillis() < cooldownUntilMs) {
+        if (SystemClock.uptimeMillis() < cooldownUntilMs || symbols == null || symbols.isEmpty()) {
             return false;
         }
         if (action == MotionEvent.ACTION_DOWN) {
@@ -568,8 +611,8 @@ final class NiagaraWaveView extends View {
             waveEngaged = false;
             backSwipeHandled = false;
             pullArmed = false;
-            // 纯长按字母导轨 140ms 未大幅滑动时，确认进入字母流体波浪选词状态
-            postDelayed(delayedEngageTask, 140L);
+            // 缩减停顿判定至 70ms，零迟滞切入流体字母波浪
+            postDelayed(delayedEngageTask, 70L);
             return true;
         }
         if (action == MotionEvent.ACTION_MOVE) {
@@ -581,7 +624,6 @@ final class NiagaraWaveView extends View {
 
             if (!waveEngaged) {
                 // 1. 优先精准识别向内滑动返回手势：水平位移明显（>16dp）且以向内水平滑动为主（dx > dy * 1.15）
-                // 此时绝不唤出字母波浪、绝不跳跃字母、绝不高亮应用，100% 干净顺畅触发返回！
                 if (dxInward > 16.0f * dp && dxInward > dy * 1.15f) {
                     removeCallbacks(delayedEngageTask);
                     if (backSwipePreferred && listener != null) {
@@ -593,9 +635,8 @@ final class NiagaraWaveView extends View {
                     return true;
                 }
 
-                // 2. 精准识别沿字母导轨上下滑动检索：垂直位移（>6dp）且以垂直滑动为主（dy >= dx * 0.8）
-                // 此时立即唤起流体波浪，并动态排除系统侧滑返回误触！
-                if (dy > 6.0f * dp && dy >= dxInward * 0.8f) {
+                // 2. 沿导轨垂直移动 > 4dp 立即唤起流体波浪，并动态排除系统侧滑返回误触
+                if (dy > 4.0f * dp && dy >= dxInward * 0.75f) {
                     removeCallbacks(delayedEngageTask);
                     engageWaveNow(y, inwardDepthPx, fromLeft);
                     return true;

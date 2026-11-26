@@ -1,4 +1,4 @@
-﻿# PowerShell build script for 极简桌面 (Minimalist Launcher)
+# PowerShell build script for 极简桌面 (Minimalist Launcher)
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $SdkRoot = 'C:\Users\Administrator\AppData\Local\Android\Sdk'
 $BuildTools = Join-Path $SdkRoot 'build-tools\34.0.0'
@@ -11,8 +11,8 @@ New-Item -ItemType Directory -Force -Path "$ProjectRoot\build\gen","$ProjectRoot
 
 [xml]$manifest = Get-Content "$ProjectRoot\AndroidManifest.xml"
 $manifest.manifest.package = 'com.niagara.local'
-$manifest.manifest.SetAttribute('android:versionCode','270')
-$manifest.manifest.SetAttribute('android:versionName','2.7.0')
+$manifest.manifest.SetAttribute('android:versionCode','280')
+$manifest.manifest.SetAttribute('android:versionName','2.8.0')
 $manifest.Save("$ProjectRoot\AndroidManifest.xml")
 
 function Build-Variant($Pkg, $OutApk) {
@@ -54,8 +54,8 @@ function Build-Variant($Pkg, $OutApk) {
     Copy-Item "$ProjectRoot\build\$OutApk" "$outDir\$OutApk" -Force
 }
 
-Build-Variant 'com.niagara.loca2' '极简桌面-v2.7.0-direct.apk'
-Build-Variant 'com.niagara.local' '极简桌面-v2.7.0.apk'
-Copy-Item "$ProjectRoot\build\极简桌面-v2.7.0.apk" "D:\NiagaraProject\极简桌面.apk" -Force
+Build-Variant 'com.niagara.loca2' '极简桌面-v2.8.0-direct.apk'
+Build-Variant 'com.niagara.local' '极简桌面-v2.8.0.apk'
+Copy-Item "$ProjectRoot\build\极简桌面-v2.8.0.apk" "D:\NiagaraProject\极简桌面.apk" -Force
 Remove-Item -Recurse -Force "$ProjectRoot\build" -ErrorAction SilentlyContinue
 Write-Host "Build finished."
