@@ -78,12 +78,9 @@ final class NiagaraWaveView extends View {
     private Set<Character> availableLetters = Collections.emptySet();
     private Map<Character, String> topAppPreview = Collections.emptyMap();
 
-    private boolean ghostEdgeTrigger = false;
     private boolean alignLeft = true;
     private boolean backSwipePreferred = false;
     private boolean pullLaunchEnabled = true;
-    private NiagaraWaveView delegateTarget;
-    private NiagaraWaveView sourceGhostBar;
     private Listener listener;
     private OnWaveScrubListener scrubListener;
     private boolean scrubActive = false;
@@ -99,7 +96,6 @@ final class NiagaraWaveView extends View {
     private int activeIdx = -1;
     private boolean pullArmed = false;
     private float pullExpandFrac = 0f;
-    private boolean autoHideIdle = false;
     private boolean idleDotsMode = true;
     private boolean silentAtRest = false;
     private ValueAnimator releaseAnim;
@@ -110,7 +106,6 @@ final class NiagaraWaveView extends View {
     private long downTimeMs = 0L;
     private boolean waveEngaged = false;
     private boolean backSwipeHandled = false;
-    private boolean touchFromLeft = false;
     private long cooldownUntilMs = 0L;
 
     private final Runnable resetExclusionTask = new Runnable() {
@@ -124,7 +119,7 @@ final class NiagaraWaveView extends View {
         @Override
         public void run() {
             if (!waveEngaged && !backSwipeHandled && touchY >= 0 && SystemClock.uptimeMillis() >= cooldownUntilMs) {
-                engageWaveNow(touchY, pullDepthPx, touchFromLeft);
+                engageWaveNow(touchY, pullDepthPx, alignLeft);
             }
         }
     };
@@ -161,10 +156,9 @@ final class NiagaraWaveView extends View {
         }
     }
 
-    void bindStyle(AuroraTheme theme, Typeface tf, boolean autoHide) {
+    void bindStyle(AuroraTheme theme, Typeface tf) {
         this.theme = theme;
         this.typeface = tf != null ? tf : Typeface.DEFAULT;
-        this.autoHideIdle = autoHide;
         invalidate();
     }
 
@@ -189,15 +183,6 @@ final class NiagaraWaveView extends View {
                 updateSystemGestureExclusion(-1f, false);
             }
             invalidate();
-        }
-    }
-
-    void setGhostEdgeDelegate(NiagaraWaveView target, boolean isLeftEdge) {
-        this.ghostEdgeTrigger = true;
-        this.alignLeft = isLeftEdge;
-        this.delegateTarget = target;
-        if (target != null) {
-            target.sourceGhostBar = this;
         }
     }
 
@@ -235,11 +220,6 @@ final class NiagaraWaveView extends View {
 
     void setOnWaveScrubListener(OnWaveScrubListener l) {
         this.scrubListener = l;
-    }
-
-    /** 当前（或最近一次）擦拭是否从左侧边缘发起，供主列表决定内推方向。 */
-    boolean isScrubFromLeft() {
-        return touchFromLeft;
     }
 
     private void dispatchScrubEnd() {
@@ -308,31 +288,13 @@ final class NiagaraWaveView extends View {
         setSystemGestureExclusionRects(Collections.singletonList(r));
     }
 
-    void clearGestureExclusionRects() {
-        if (Build.VERSION.SDK_INT >= 29) {
-            setSystemGestureExclusionRects(Collections.<Rect>emptyList());
-        }
-    }
-
-    /** 触点所在导轨进入跟随态，另一侧导轨保持常驻态。 */
     private void applyDynamicExclusion(float currentY, boolean fromLeft) {
         removeCallbacks(resetExclusionTask);
-        if (fromLeft && sourceGhostBar != null) {
-            sourceGhostBar.updateSystemGestureExclusion(currentY, true);
-            updateSystemGestureExclusion(-1f, false);
-        } else {
-            updateSystemGestureExclusion(currentY, true);
-            if (sourceGhostBar != null) {
-                sourceGhostBar.updateSystemGestureExclusion(-1f, false);
-            }
-        }
+        updateSystemGestureExclusion(currentY, true);
     }
 
     private void restoreIdleExclusions() {
         updateSystemGestureExclusion(-1f, false);
-        if (sourceGhostBar != null) {
-            sourceGhostBar.updateSystemGestureExclusion(-1f, false);
-        }
     }
 
     /** 松手后延时 300ms 平滑回到常驻排除区，避免边缘手势死锁或瞬间放开造成误触返回。 */
@@ -343,8 +305,8 @@ final class NiagaraWaveView extends View {
 
     @Override
     protected void onDraw(Canvas canvas) {
-        if (ghostEdgeTrigger || theme == null || symbols == null || symbols.isEmpty()) return;
-        if ((autoHideIdle || silentAtRest) && waveStrength <= 0.01f) return;
+        if (theme == null || symbols == null || symbols.isEmpty()) return;
+        if (silentAtRest && waveStrength <= 0.01f) return;
 
         int w = getWidth(), h = getHeight();
         if (w <= 0 || h <= 0) return;
@@ -488,12 +450,6 @@ final class NiagaraWaveView extends View {
             if (!inTouchZone) return false;
             if (getParent() != null) getParent().requestDisallowInterceptTouchEvent(true);
         }
-        if (ghostEdgeTrigger && delegateTarget != null) {
-            float depth = alignLeft
-                    ? Math.max(0f, event.getX())
-                    : Math.max(0f, getWidth() - event.getX());
-            return delegateTarget.handleWaveMotion(action, event.getY(), depth, alignLeft);
-        }
         float depth = alignLeft
                 ? Math.max(0f, event.getX())
                 : Math.max(0f, getWidth() - event.getX());
@@ -607,7 +563,6 @@ final class NiagaraWaveView extends View {
             downTimeMs = SystemClock.uptimeMillis();
             touchY = Math.max(0f, Math.min(getHeight() - 1f, y));
             pullDepthPx = Math.max(0f, inwardDepthPx);
-            touchFromLeft = fromLeft;
             waveEngaged = false;
             backSwipeHandled = false;
             pullArmed = false;

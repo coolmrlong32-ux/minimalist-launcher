@@ -73,14 +73,6 @@ public class NotificationHubService extends NotificationListenerService {
     private static String formatWeatherBadge(String title, String text) {
         String raw = ((title == null ? "" : title.trim()) + " " + (text == null ? "" : text.trim())).trim();
         if (raw.isEmpty()) return "";
-        String icon = "🌤";
-        if (raw.contains("雷")) icon = "⛈";
-        else if (raw.contains("雪")) icon = "❄️";
-        else if (raw.contains("雨")) icon = "🌧";
-        else if (raw.contains("雾") || raw.contains("霾")) icon = "🌫";
-        else if (raw.contains("阴")) icon = "☁️";
-        else if (raw.contains("多云")) icon = "⛅";
-        else if (raw.contains("晴")) icon = "☀️";
 
         Matcher m = TEMP_PATTERN.matcher(raw);
         String tempStr = m.find() ? (m.group(1) + "°C") : "";
@@ -94,11 +86,11 @@ public class NotificationHubService extends NotificationListenerService {
             }
         }
 
-        if (!tempStr.isEmpty() && !cond.isEmpty()) return icon + " " + tempStr + " · " + cond;
-        if (!tempStr.isEmpty()) return icon + " " + tempStr;
+        if (!tempStr.isEmpty() && !cond.isEmpty()) return tempStr + " · " + cond;
+        if (!tempStr.isEmpty()) return tempStr;
         String clean = raw.replaceAll("\\s+", " ");
         if (clean.length() > 12) clean = clean.substring(0, 12);
-        return icon + " " + clean;
+        return clean;
     }
 
     @Override

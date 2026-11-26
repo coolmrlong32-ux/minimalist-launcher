@@ -83,18 +83,12 @@ public class GestureLockService extends AccessibilityService {
     @Override
     public void onInterrupt() {}
 
-    static boolean wasJustLocked() {
-        return SystemClock.uptimeMillis() - lastLockTimestamp < 4500;
-    }
-
     static boolean lockScreenNow() {
         GestureLockService s = instance;
         if (s == null || Build.VERSION.SDK_INT < 28) return false;
         long now = SystemClock.uptimeMillis();
         if (now - lastLockTimestamp < 2400) return true;
         lastLockTimestamp = now;
-        MainActivity.wasOnHomeBeforeLock = true;
-        MainActivity.launchedExternalApp = false;
         return s.performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN);
     }
 

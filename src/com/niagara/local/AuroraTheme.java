@@ -158,10 +158,6 @@ final class AuroraTheme {
         return WeatherSyncEngine.getSolarPhase(ctx);
     }
 
-    static boolean isSystemNightMode(Context ctx) {
-        return resolveSolarPhase(ctx) == WeatherSyncEngine.SOLAR_NIGHT;
-    }
-
     static AuroraTheme resolve(Context ctx, int idx) {
         idx = Math.max(0, Math.min(PRESETS.length - 1, idx));
         AuroraTheme base = PRESETS[idx];
@@ -281,27 +277,6 @@ final class AuroraTheme {
         return g;
     }
 
-    GradientDrawable unifiedStatusBarBg(float density) {
-        int topC, botC, strokeC;
-        if (isLight) {
-            int tintedTop = blendColors(0xFFFFFFFF, glassTopTint, 0.18f);
-            int tintedBot = blendColors(0xFFF8FAFC, glassTopTint, 0.24f);
-            topC = withAlpha(tintedTop, 0xAA);
-            botC = withAlpha(tintedBot, 0x92);
-            strokeC = withAlpha(blendColors(glassTopTint, 0xFF141824, 0.35f), 0x30);
-        } else {
-            int tintedTop = blendColors(glassTopTint, 0xFFFFFFFF, 0.14f);
-            int tintedBot = blendColors(glassTopTint, baseBg, 0.22f);
-            topC = withAlpha(tintedTop, 0x5E);
-            botC = withAlpha(tintedBot, 0x48);
-            strokeC = withAlpha(blendColors(accent, 0xFFFFFFFF, 0.45f), 0x46);
-        }
-        GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{topC, botC});
-        g.setStroke(Math.max(1, (int) (density * 0.9f)), strokeC);
-        g.setCornerRadius(15f * density);
-        return g;
-    }
-
     int[] coinButtonGradientColors() {
         if (isLight) {
             return new int[]{
@@ -346,14 +321,6 @@ final class AuroraTheme {
             g.setStroke(Math.max(1, (int) (density * 0.8f)), hasNotif ? ((accent & 0x00FFFFFF) | 0x48000000) : 0x20FFFFFF);
         }
         g.setCornerRadius(18f * density);
-        return g;
-    }
-
-    GradientDrawable accentRailDrawable(float density, boolean active) {
-        int top = (accent & 0x00FFFFFF) | (active ? 0xEE000000 : (isLight ? 0x78000000 : 0x90000000));
-        int bot = (accentBubble & 0x00FFFFFF) | (active ? 0xAA000000 : (isLight ? 0x28000000 : 0x38000000));
-        GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{top, bot});
-        g.setCornerRadius(2.5f * density);
         return g;
     }
 

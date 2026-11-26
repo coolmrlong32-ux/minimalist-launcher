@@ -78,9 +78,8 @@ final class SettingsSheetController {
         void onTextScaleChanged(float scale);
         void onUse24HChanged(boolean use24h);
         void showClockStylePicker();
-        void onSmartBatteryChanged(boolean smartOnly);
-        void onStatusBarFullChanged(boolean full);
-        void onHeroHighContrastChanged(boolean highContrast);
+        String getCurrentStatusBarModeName();
+        void showStatusBarModePicker();
         void onFavCardsChanged(boolean on);
         void onOneHandGravityChanged(boolean on);
         void onSurfaceUnreadHomeChanged(boolean on);
@@ -110,29 +109,6 @@ final class SettingsSheetController {
         void openAccessibilitySettings();
         void openNotificationListenerSettings();
     }
-
-    private static final int IC_PALETTE = 0;
-    private static final int IC_WALLPAPER = 1;
-    private static final int IC_SUN = 2;
-    private static final int IC_SPARK = 3;
-    private static final int IC_SHAPES = 4;
-    private static final int IC_FONT = 5;
-    private static final int IC_CLOCK = 6;
-    private static final int IC_STAR = 7;
-    private static final int IC_SORT = 8;
-    private static final int IC_BATTERY = 9;
-    private static final int IC_CARD = 10;
-    private static final int IC_DENSITY = 11;
-    private static final int IC_GESTURE = 12;
-    private static final int IC_LOCK = 13;
-    private static final int IC_BELL = 14;
-    private static final int IC_SHIELD = 15;
-    private static final int IC_HOME = 16;
-    private static final int IC_NOTE = 17;
-    private static final int IC_FOLDER = 18;
-    private static final int IC_EYE_OFF = 19;
-    private static final int IC_BACKUP = 20;
-    private static final int IC_SEARCH = 21;
 
     static Dialog show(final Host host) {
         final Context ctx = host.getContext();
@@ -179,13 +155,13 @@ final class SettingsSheetController {
 
         LinearLayout titleCol = new LinearLayout(ctx);
         titleCol.setOrientation(LinearLayout.VERTICAL);
-        String verName = "2.8.0";
+        String verName = "2.9.0";
         try {
             String vn = ctx.getPackageManager().getPackageInfo(ctx.getPackageName(), 0).versionName;
             if (vn != null && !vn.isEmpty()) verName = vn;
         } catch (Throwable ignored) {}
         TextView titleTv = makeText(ctx, tf, host.sp(19f), theme.textPrimary, true, "流光桌面设置");
-        TextView subTv = makeText(ctx, tf, host.sp(11.5f), theme.textSecondary, false, "v" + verName + " · 原生 Niagara 深度体验版");
+        TextView subTv = makeText(ctx, tf, host.sp(11.5f), theme.textSecondary, false, "v" + verName);
         subTv.setPadding(0, Math.round(2 * dp), 0, 0);
         titleCol.addView(titleTv);
         titleCol.addView(subTv);
@@ -202,11 +178,12 @@ final class SettingsSheetController {
         sblp.rightMargin = Math.round(8 * dp);
         topBar.addView(statusBtn, sblp);
 
-        TextView closeBtn = makeText(ctx, tf, host.sp(15f), theme.textSecondary, true, "✕");
-        closeBtn.setGravity(Gravity.CENTER);
-        closeBtn.setBackground(theme.subtleGhostPill(dp, 16));
+        FrameLayout closeBtn = new FrameLayout(ctx);
+        closeBtn.setBackground(theme.subtleGhostPill(dp, 17));
+        VectorGlyphView closeIc = new VectorGlyphView(ctx, VectorGlyphView.IC_CLOSE, theme.textSecondary, dp);
+        closeBtn.addView(closeIc, new FrameLayout.LayoutParams(Math.round(14 * dp), Math.round(14 * dp), Gravity.CENTER));
         closeBtn.setOnClickListener(v -> dlg.dismiss());
-        topBar.addView(closeBtn, new LinearLayout.LayoutParams(Math.round(32 * dp), Math.round(32 * dp)));
+        topBar.addView(closeBtn, new LinearLayout.LayoutParams(Math.round(34 * dp), Math.round(34 * dp)));
 
         root.addView(topBar);
 
@@ -223,6 +200,101 @@ final class SettingsSheetController {
         LinearLayout content = new LinearLayout(ctx);
         content.setOrientation(LinearLayout.VERTICAL);
         content.setPadding(Math.round(16 * dp), Math.round(10 * dp), Math.round(16 * dp), Math.round(28 * dp));
+
+        // ==================== 顶部系统权限与保活体检摘要条（可展开详情） ====================
+        LinearLayout healthBanner = makeGroupCard(ctx, theme, dp);
+        LinearLayout bannerRow = makeBaseRow(ctx, dp);
+        final VectorGlyphView bannerIcon = new VectorGlyphView(ctx, VectorGlyphView.IC_SHIELD, theme.accent, dp);
+        FrameLayout bannerIconWrap = new FrameLayout(ctx);
+        GradientDrawable bannerIconBg = new GradientDrawable();
+        bannerIconBg.setCornerRadius(9 * dp);
+        bannerIconWrap.setBackground(bannerIconBg);
+        bannerIconWrap.addView(bannerIcon, new FrameLayout.LayoutParams(Math.round(16 * dp), Math.round(16 * dp), Gravity.CENTER));
+        LinearLayout.LayoutParams biLp = new LinearLayout.LayoutParams(Math.round(28 * dp), Math.round(28 * dp));
+        biLp.rightMargin = Math.round(12 * dp);
+        bannerRow.addView(bannerIconWrap, biLp);
+
+        LinearLayout bannerTitleCol = makeTitleCol(ctx, tf, host, theme, dp, "系统权限与保活体检", "默认桌面 · 常驻守护 · 电池白名单 · 无障碍 · 通知");
+        bannerRow.addView(bannerTitleCol, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        final TextView bannerBadge = makeText(ctx, tf, host.sp(11.6f), theme.accent, true, "");
+        bannerBadge.setPadding(Math.round(10 * dp), Math.round(5 * dp), Math.round(10 * dp), Math.round(5 * dp));
+        LinearLayout.LayoutParams bbLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        bbLp.leftMargin = Math.round(8 * dp);
+        bannerRow.addView(bannerBadge, bbLp);
+        healthBanner.addView(bannerRow);
+        content.addView(healthBanner);
+
+        final LinearLayout gHealthWrap = new LinearLayout(ctx);
+        gHealthWrap.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout gHealth = makeGroupCard(ctx, theme, dp);
+        LinearLayout.LayoutParams ghLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        ghLp.topMargin = Math.round(8 * dp);
+
+        statusRefreshers.add(addHealthCheckRow(ctx, tf, host, theme, dp, gHealth, VectorGlyphView.IC_HOME,
+                "设为系统默认桌面", "确保按 Home 键或上滑秒回流光桌面",
+                () -> isDefaultHomeApp(ctx), "去设置", host::openHomeSettings));
+        addDivider(ctx, theme, dp, gHealth);
+        addSwitchRow(ctx, tf, host, theme, dp, gHealth, VectorGlyphView.IC_SHIELD,
+                "后台常驻守护服务", "防止系统回收桌面进程，实现退回桌面零重载",
+                prefs.getBoolean("keep_alive", true), on -> {
+                    host.onKeepAliveChanged(on);
+                    for (Runnable r : statusRefreshers) r.run();
+                });
+        addDivider(ctx, theme, dp, gHealth);
+        statusRefreshers.add(addHealthCheckRow(ctx, tf, host, theme, dp, gHealth, VectorGlyphView.IC_BATTERY,
+                "忽略电池优化（白名单）", "阻止后台省电策略冻结或延迟桌面唤醒",
+                () -> isIgnoringBatteryOpt(ctx), "去放行", host::openBatteryOptimizationSettings));
+        addDivider(ctx, theme, dp, gHealth);
+        statusRefreshers.add(addHealthCheckRow(ctx, tf, host, theme, dp, gHealth, VectorGlyphView.IC_LOCK,
+                "无障碍手势服务", "驱动双击锁屏、单手拉通知栏与一键多任务后台",
+                GestureLockService::isRunning, "去开启", host::openAccessibilitySettings));
+        addDivider(ctx, theme, dp, gHealth);
+        statusRefreshers.add(addHealthCheckRow(ctx, tf, host, theme, dp, gHealth, VectorGlyphView.IC_BELL,
+                "通知使用权（兼系统级保活）", "驱动通知胶囊、音乐控制并让系统持久绑定进程",
+                () -> isNotificationListenerEnabled(ctx), "去授权", host::openNotificationListenerSettings));
+        addDivider(ctx, theme, dp, gHealth);
+        addActionRow(ctx, tf, host, theme, dp, gHealth, VectorGlyphView.IC_SHIELD,
+                "系统耗电与自启动详情", "ColorOS / 一加建议开启「允许完全后台行为」与「允许自启动」",
+                "前往", host::openAppDetailsSettings);
+        gHealthWrap.addView(gHealth, ghLp);
+
+        int initialOk = countHealthyItems(ctx, prefs);
+        gHealthWrap.setVisibility(initialOk == 5 ? View.GONE : View.VISIBLE);
+        Runnable refreshBanner = () -> {
+            int okCount = countHealthyItems(ctx, prefs);
+            boolean expanded = gHealthWrap.getVisibility() == View.VISIBLE;
+            if (okCount == 5) {
+                int green = theme.isLight ? 0xFF059669 : 0xFF34D399;
+                bannerIcon.setColor(green);
+                bannerIconBg.setColor(theme.isLight ? 0x1A10B981 : 0x2634D399);
+                bannerBadge.setText(expanded ? "5/5 已就绪 ▴" : "5/5 已就绪 ✓");
+                bannerBadge.setTextColor(green);
+                GradientDrawable bg = new GradientDrawable();
+                bg.setColor(theme.isLight ? 0x1A10B981 : 0x2634D399);
+                bg.setCornerRadius(12 * dp);
+                bannerBadge.setBackground(bg);
+            } else {
+                int amber = theme.isLight ? 0xFFD97706 : 0xFFFBBF24;
+                bannerIcon.setColor(amber);
+                bannerIconBg.setColor(theme.isLight ? 0x1AF59E0B : 0x28F59E0B);
+                bannerBadge.setText(okCount + "/5 待完善 " + (expanded ? "▴" : "›"));
+                bannerBadge.setTextColor(amber);
+                GradientDrawable bg = new GradientDrawable();
+                bg.setColor(theme.isLight ? 0x1AF59E0B : 0x28F59E0B);
+                bg.setStroke(Math.max(1, Math.round(0.8f * dp)), 0x55F59E0B);
+                bg.setCornerRadius(12 * dp);
+                bannerBadge.setBackground(bg);
+            }
+        };
+        statusRefreshers.add(refreshBanner);
+        refreshBanner.run();
+        healthBanner.setOnClickListener(v -> {
+            v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+            gHealthWrap.setVisibility(gHealthWrap.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE);
+            refreshBanner.run();
+        });
+        content.addView(gHealthWrap);
 
         // ==================== 分组 1：外观与壁纸 ====================
         addGroupTitle(ctx, tf, host, theme, dp, content, "外观与壁纸");
@@ -275,268 +347,226 @@ final class SettingsSheetController {
         gAppearance.addView(paletteBox);
 
         addDivider(ctx, theme, dp, gAppearance);
-        addActionRow(ctx, tf, host, theme, dp, gAppearance, IC_WALLPAPER, "从相册选择壁纸", "自动适配昼夜护眼亮度", "", () -> {
+        addActionRow(ctx, tf, host, theme, dp, gAppearance, VectorGlyphView.IC_WALLPAPER, "从相册选择壁纸", "自动适配昼夜护眼亮度", "", () -> {
             dlg.dismiss();
             host.pickGalleryWallpaper();
         });
 
         addDivider(ctx, theme, dp, gAppearance);
-        int curDim = prefs.getInt("dim_pct", 0);
-        addSliderRow(ctx, tf, host, theme, dp, gAppearance, IC_SUN, "壁纸暗化遮罩", curDim + "%", 70, curDim, val -> {
-            host.onDimPercentChanged(val);
-            return val + "%";
-        });
-
-        addDivider(ctx, theme, dp, gAppearance);
-        addSwitchRow(ctx, tf, host, theme, dp, gAppearance, IC_WALLPAPER, "仅同步锁屏壁纸", "开启后日出日落仅更新锁屏，保留当前桌面壁纸",
-                prefs.getBoolean("wall_lock_only_v1", false), host::onWallLockOnlyChanged);
-
-        addDivider(ctx, theme, dp, gAppearance);
-        addSwitchRow(ctx, tf, host, theme, dp, gAppearance, IC_SPARK, "极光流体微动", "纯色/极光壁纸缓慢微光流动（关闭更省电）",
-                prefs.getBoolean("flow_anim", true), host::onFlowAnimChanged);
-
-        addDivider(ctx, theme, dp, gAppearance);
-        addActionRow(ctx, tf, host, theme, dp, gAppearance, IC_SHAPES, "图标造型", "含超椭圆、液态玻璃与 Niagara Dots 圆点",
+        addActionRow(ctx, tf, host, theme, dp, gAppearance, VectorGlyphView.IC_SHAPES, "图标造型", "超椭圆、液态玻璃与 Niagara Dots 圆点",
                 host.getCurrentIconShapeName(), () -> {
             dlg.dismiss();
             host.showIconShapePicker();
         });
 
         addDivider(ctx, theme, dp, gAppearance);
-        addActionRow(ctx, tf, host, theme, dp, gAppearance, IC_SHAPES, "第三方图标包", "支持 Nova / ADW 规范图标包 APK",
-                host.getCurrentIconPackName(), () -> {
-            dlg.dismiss();
-            host.showIconPackPicker();
-        });
-
-        addDivider(ctx, theme, dp, gAppearance);
-        addSwitchRow(ctx, tf, host, theme, dp, gAppearance, IC_EYE_OFF, "显示应用图标", "关闭则切换为 Niagara 极简纯文字模式",
-                prefs.getBoolean("show_icons", true), host::onShowIconsChanged);
-
-        addDivider(ctx, theme, dp, gAppearance);
-        addActionRow(ctx, tf, host, theme, dp, gAppearance, IC_FONT, "字体风格", "调整时钟与列表字体气质",
+        addActionRow(ctx, tf, host, theme, dp, gAppearance, VectorGlyphView.IC_FONT, "字体风格", "调整时钟与列表字体气质",
                 host.getCurrentFontName(), () -> {
             dlg.dismiss();
             host.showFontPicker();
         });
 
         addDivider(ctx, theme, dp, gAppearance);
+        addActionRow(ctx, tf, host, theme, dp, gAppearance, VectorGlyphView.IC_CLOCK, "时钟排版风格", "经典纤巧 / 现代圆润 / 极简居中",
+                host.getCurrentClockStyleName(), () -> {
+            dlg.dismiss();
+            host.showClockStylePicker();
+        });
+
+        LinearLayout moreAppearanceBox = new LinearLayout(ctx);
+        moreAppearanceBox.setOrientation(LinearLayout.VERTICAL);
+        moreAppearanceBox.setVisibility(View.GONE);
+
+        addDivider(ctx, theme, dp, moreAppearanceBox);
+        int curDim = prefs.getInt("dim_pct", 0);
+        addSliderRow(ctx, tf, host, theme, dp, moreAppearanceBox, VectorGlyphView.IC_SUN, "壁纸暗化遮罩", curDim + "%", 70, curDim, val -> {
+            host.onDimPercentChanged(val);
+            return val + "%";
+        });
+
+        addDivider(ctx, theme, dp, moreAppearanceBox);
+        addSwitchRow(ctx, tf, host, theme, dp, moreAppearanceBox, VectorGlyphView.IC_WALLPAPER, "仅同步锁屏壁纸", "日出日落仅更新锁屏，保留当前桌面壁纸",
+                prefs.getBoolean("wall_lock_only_v1", false), host::onWallLockOnlyChanged);
+
+        addDivider(ctx, theme, dp, moreAppearanceBox);
+        addSwitchRow(ctx, tf, host, theme, dp, moreAppearanceBox, VectorGlyphView.IC_SPARK, "极光流体微动", "触摸壁纸时的微光涟漪反馈",
+                prefs.getBoolean("flow_anim", true), host::onFlowAnimChanged);
+
+        addDivider(ctx, theme, dp, moreAppearanceBox);
+        addActionRow(ctx, tf, host, theme, dp, moreAppearanceBox, VectorGlyphView.IC_SHAPES, "第三方图标包", "支持 Nova / ADW 规范图标包 APK",
+                host.getCurrentIconPackName(), () -> {
+            dlg.dismiss();
+            host.showIconPackPicker();
+        });
+
+        addDivider(ctx, theme, dp, moreAppearanceBox);
+        addSwitchRow(ctx, tf, host, theme, dp, moreAppearanceBox, VectorGlyphView.IC_EYE_OFF, "显示应用图标", "关闭则切换为极简纯文字模式",
+                prefs.getBoolean("show_icons", true), host::onShowIconsChanged);
+
+        addDivider(ctx, theme, dp, moreAppearanceBox);
         float curScale = prefs.getFloat("text_scale", 1.0f);
         int scaleStep = Math.max(0, Math.min(7, Math.round((curScale - 0.85f) / 0.05f)));
-        addSliderRow(ctx, tf, host, theme, dp, gAppearance, IC_FONT, "全局字号缩放",
+        addSliderRow(ctx, tf, host, theme, dp, moreAppearanceBox, VectorGlyphView.IC_FONT, "全局字号缩放",
                 String.format(Locale.ROOT, "%.0f%%", curScale * 100f), 7, scaleStep, val -> {
             float ns = 0.85f + val * 0.05f;
             host.onTextScaleChanged(ns);
             return String.format(Locale.ROOT, "%.0f%%", ns * 100f);
         });
 
-        addDivider(ctx, theme, dp, gAppearance);
-        addSwitchRow(ctx, tf, host, theme, dp, gAppearance, IC_CLOCK, "24 小时制时钟", "关闭则显示 12 小时制",
+        addDivider(ctx, theme, dp, moreAppearanceBox);
+        addSwitchRow(ctx, tf, host, theme, dp, moreAppearanceBox, VectorGlyphView.IC_CLOCK, "24 小时制时钟", "关闭则显示 12 小时制",
                 prefs.getBoolean("use_24h", true), host::onUse24HChanged);
 
-        addDivider(ctx, theme, dp, gAppearance);
-        addActionRow(ctx, tf, host, theme, dp, gAppearance, IC_CLOCK, "时钟排版风格", "经典纤巧 / 现代圆润 / 极简居中",
-                host.getCurrentClockStyleName(), () -> {
-            dlg.dismiss();
-            host.showClockStylePicker();
-        });
-
+        addExpandToggleRow(ctx, tf, host, theme, dp, gAppearance, "更多外观细节", moreAppearanceBox);
+        gAppearance.addView(moreAppearanceBox);
         content.addView(gAppearance);
 
         // ==================== 分组 2：首页与常用 ====================
-        addGroupTitle(ctx, tf, host, theme, dp, content, "首页与常用应用");
+        addGroupTitle(ctx, tf, host, theme, dp, content, "首页与常用");
         LinearLayout gHome = makeGroupCard(ctx, theme, dp);
 
-        addActionRow(ctx, tf, host, theme, dp, gHome, IC_STAR, "勾选第一页常用应用", "选择固定在首页的高频应用",
+        addActionRow(ctx, tf, host, theme, dp, gHome, VectorGlyphView.IC_STAR, "勾选第一页常用应用", "选择固定在首页的高频应用",
                 "已选 " + host.getFavoritesCount() + " 个", () -> {
             dlg.dismiss();
             host.showPickFavorites();
         });
 
         addDivider(ctx, theme, dp, gHome);
-        addActionRow(ctx, tf, host, theme, dp, gHome, IC_SORT, "调整常用应用顺序", "自定义首页应用上下排列", "", () -> {
+        addActionRow(ctx, tf, host, theme, dp, gHome, VectorGlyphView.IC_SORT, "调整常用应用顺序", "自定义首页应用上下排列", "", () -> {
             dlg.dismiss();
             host.showReorderFavorites();
         });
 
         addDivider(ctx, theme, dp, gHome);
-        addSwitchRow(ctx, tf, host, theme, dp, gHome, IC_BATTERY, "智能按需显示电量", "原生极简：仅充电或低电（≤20%）时浮现，关闭则常显",
-                prefs.getBoolean("smart_battery_only_v1", true), host::onSmartBatteryChanged);
+        addActionRow(ctx, tf, host, theme, dp, gHome, VectorGlyphView.IC_BATTERY, "顶部状态栏信息", "切换按需电量 / 常显电量 / 温度与运存",
+                host.getCurrentStatusBarModeName(), () -> {
+            dlg.dismiss();
+            host.showStatusBarModePicker();
+        });
 
         addDivider(ctx, theme, dp, gHome);
-        addSwitchRow(ctx, tf, host, theme, dp, gHome, IC_BATTERY, "状态栏显示温度与运存", "默认极简，开启后追加电池温度与可用内存",
-                prefs.getBoolean("status_bar_full_v1", false), host::onStatusBarFullChanged);
-
-        addDivider(ctx, theme, dp, gHome);
-        addSwitchRow(ctx, tf, host, theme, dp, gHome, IC_SUN, "状态栏高对比度排版", "增强浅色或复杂壁纸下天气、电量的文字清晰度",
-                prefs.getBoolean("hero_high_contrast_v1", false), host::onHeroHighContrastChanged);
-
-        addDivider(ctx, theme, dp, gHome);
-        addSwitchRow(ctx, tf, host, theme, dp, gHome, IC_BELL, "首页动态浮现未读通知应用", "非首页应用来消息时临时呈现在首页，清除即隐退",
-                prefs.getBoolean("surface_unread_home_v1", true), host::onSurfaceUnreadHomeChanged);
-
-        addDivider(ctx, theme, dp, gHome);
-        addSwitchRow(ctx, tf, host, theme, dp, gHome, IC_CARD, "常用应用毛玻璃底衬", "为首页常用应用行添加柔光卡片背景",
-                prefs.getBoolean("fav_cards_v2", false), host::onFavCardsChanged);
-
-        addDivider(ctx, theme, dp, gHome);
-        addSwitchRow(ctx, tf, host, theme, dp, gHome, IC_GESTURE, "单手黄金区重心下沉", "常用较少时自动下移列表至拇指舒适区",
-                prefs.getBoolean("one_hand_gravity_v1", true), host::onOneHandGravityChanged);
-
-        addDivider(ctx, theme, dp, gHome);
-        addSwitchRow(ctx, tf, host, theme, dp, gHome, IC_SPARK, "顶部一览媒体控制条", "播放音乐时自动浮现极简专辑封面与 2dp 进度线",
-                prefs.getBoolean("show_media", true), host::onShowMediaChanged);
-
-        addDivider(ctx, theme, dp, gHome);
-        addSwitchRow(ctx, tf, host, theme, dp, gHome, IC_CLOCK, "顶部一览近期日程", "在首页状态栏下方展示即将开始的日历事件",
-                prefs.getBoolean("show_agenda", false), host::onShowAgendaChanged);
-
-        addDivider(ctx, theme, dp, gHome);
-        addActionRow(ctx, tf, host, theme, dp, gHome, IC_CARD, "桌面原生小组件 (Widgets)", "将系统天气、待办等微件贴到首页顶部一体流",
+        addActionRow(ctx, tf, host, theme, dp, gHome, VectorGlyphView.IC_CARD, "桌面原生小组件 (Widgets)", "将系统天气、待办等微件贴到首页顶部一体流",
                 "已贴 " + host.getPinnedWidgetCount() + " 个", () -> {
             dlg.dismiss();
             host.openWidgetManager();
         });
 
         addDivider(ctx, theme, dp, gHome);
-        addActionRow(ctx, tf, host, theme, dp, gHome, IC_DENSITY, "列表疏密程度", "调整应用行垂直呼吸间距",
+        addActionRow(ctx, tf, host, theme, dp, gHome, VectorGlyphView.IC_DENSITY, "列表疏密程度", "调整应用行垂直呼吸间距",
                 host.getCurrentDensityName(), () -> {
             dlg.dismiss();
             host.showDensityPicker();
         });
 
+        LinearLayout moreHomeBox = new LinearLayout(ctx);
+        moreHomeBox.setOrientation(LinearLayout.VERTICAL);
+        moreHomeBox.setVisibility(View.GONE);
+
+        addDivider(ctx, theme, dp, moreHomeBox);
+        addSwitchRow(ctx, tf, host, theme, dp, moreHomeBox, VectorGlyphView.IC_BELL, "首页动态浮现未读通知应用", "非首页应用来消息时临时呈现在首页，清除即隐退",
+                prefs.getBoolean("surface_unread_home_v1", true), host::onSurfaceUnreadHomeChanged);
+
+        addDivider(ctx, theme, dp, moreHomeBox);
+        addSwitchRow(ctx, tf, host, theme, dp, moreHomeBox, VectorGlyphView.IC_CARD, "常用应用毛玻璃底衬", "为首页常用应用行添加柔光卡片背景",
+                prefs.getBoolean("fav_cards_v2", false), host::onFavCardsChanged);
+
+        addDivider(ctx, theme, dp, moreHomeBox);
+        addSwitchRow(ctx, tf, host, theme, dp, moreHomeBox, VectorGlyphView.IC_GESTURE, "单手黄金区重心下沉", "常用较少时自动下移列表至拇指舒适区",
+                prefs.getBoolean("one_hand_gravity_v1", true), host::onOneHandGravityChanged);
+
+        addDivider(ctx, theme, dp, moreHomeBox);
+        addSwitchRow(ctx, tf, host, theme, dp, moreHomeBox, VectorGlyphView.IC_SPARK, "顶部一览媒体控制条", "播放音乐时自动浮现极简专辑封面与 2dp 进度线",
+                prefs.getBoolean("show_media", true), host::onShowMediaChanged);
+
+        addDivider(ctx, theme, dp, moreHomeBox);
+        addSwitchRow(ctx, tf, host, theme, dp, moreHomeBox, VectorGlyphView.IC_CLOCK, "顶部一览近期日程", "在首页状态栏下方展示即将开始的日历事件",
+                prefs.getBoolean("show_agenda", false), host::onShowAgendaChanged);
+
+        addExpandToggleRow(ctx, tf, host, theme, dp, gHome, "更多排版细节", moreHomeBox);
+        gHome.addView(moreHomeBox);
         content.addView(gHome);
 
         // ==================== 分组 3：手势与交互 ====================
         addGroupTitle(ctx, tf, host, theme, dp, content, "手势与交互");
         LinearLayout gGesture = makeGroupCard(ctx, theme, dp);
 
-        addSwitchRow(ctx, tf, host, theme, dp, gGesture, IC_GESTURE, "首页下拉呼出极速搜索", "关闭则首页下拉直接展开系统通知栏",
+        addSwitchRow(ctx, tf, host, theme, dp, gGesture, VectorGlyphView.IC_GESTURE, "首页下拉呼出极速搜索", "关闭则首页下拉直接展开系统通知栏",
                 prefs.getBoolean("pull_down_search_v1", true), host::onPullDownSearchChanged);
 
         addDivider(ctx, theme, dp, gGesture);
-        addSwitchRow(ctx, tf, host, theme, dp, gGesture, IC_SPARK, "字母导轨静默圆点模式", "原生 Niagara 风格：静止显示极简圆点，触碰展开流体字母",
+        addSwitchRow(ctx, tf, host, theme, dp, gGesture, VectorGlyphView.IC_SPARK, "字母导轨静默圆点模式", "静止显示极简圆点，触碰展开流体字母",
                 prefs.getBoolean("wave_idle_dots_v1", true), host::onWaveIdleDotsChanged);
 
         addDivider(ctx, theme, dp, gGesture);
-        addSwitchRow(ctx, tf, host, theme, dp, gGesture, IC_SPARK, "自适应字母导轨", "仅显示实际存在应用的首字母，关闭则显示完整 A-Z",
+        addSwitchRow(ctx, tf, host, theme, dp, gGesture, VectorGlyphView.IC_SPARK, "自适应字母导轨", "仅显示实际存在应用的首字母，关闭则显示完整 A-Z",
                 prefs.getBoolean("wave_adaptive_alpha_v1", true), host::onWaveAdaptiveAlphaChanged);
 
         addDivider(ctx, theme, dp, gGesture);
-        addActionRow(ctx, tf, host, theme, dp, gGesture, IC_SEARCH, "默认网页搜索引擎", "极速搜索输入关键词后一键跳转网页搜索",
+        addActionRow(ctx, tf, host, theme, dp, gGesture, VectorGlyphView.IC_SEARCH, "默认网页搜索引擎", "极速搜索输入关键词后一键跳转网页搜索",
                 host.getCurrentSearchEngineName(), () -> {
             dlg.dismiss();
             host.showSearchEnginePicker();
         });
 
         addDivider(ctx, theme, dp, gGesture);
-        addActionRow(ctx, tf, host, theme, dp, gGesture, IC_GESTURE, "悬浮按钮轻点动作", "可切换为极速搜索、多任务后台、语音或隐藏",
+        addActionRow(ctx, tf, host, theme, dp, gGesture, VectorGlyphView.IC_GESTURE, "悬浮按钮轻点动作", "切换极速搜索、多任务后台、语音或隐藏",
                 host.getCurrentCoinActionName(), () -> {
             dlg.dismiss();
             host.showCoinActionPicker();
         });
 
         addDivider(ctx, theme, dp, gGesture);
-        addSwitchRow(ctx, tf, host, theme, dp, gGesture, IC_GESTURE, "悬浮多任务按钮靠左", "适配左手单手握持习惯（默认在右下角）",
+        addSwitchRow(ctx, tf, host, theme, dp, gGesture, VectorGlyphView.IC_GESTURE, "悬浮多任务按钮靠左", "适配左手单手握持习惯（默认在右下角）",
                 prefs.getBoolean("coin_left_v1", false), host::onCoinLeftChanged);
 
         addDivider(ctx, theme, dp, gGesture);
-        addSwitchRow(ctx, tf, host, theme, dp, gGesture, IC_SPARK, "波浪导轨内拉直达", "在字母导轨停留后向内拉动直接打开首位应用",
+        addSwitchRow(ctx, tf, host, theme, dp, gGesture, VectorGlyphView.IC_SPARK, "波浪导轨内拉直达", "在字母导轨停留后向内拉动直接打开首位应用",
                 prefs.getBoolean("pull_launch", true), host::onPullLaunchChanged);
 
         addDivider(ctx, theme, dp, gGesture);
-        addSwitchRow(ctx, tf, host, theme, dp, gGesture, IC_LOCK, "双击空白处熄屏锁屏", "点应用图标 0 延迟秒开，仅空白区响应双击锁屏",
+        addSwitchRow(ctx, tf, host, theme, dp, gGesture, VectorGlyphView.IC_LOCK, "双击空白处熄屏锁屏", "点应用图标 0 延迟秒开，仅空白区响应双击锁屏",
                 prefs.getBoolean("double_tap_lock", true), host::onDoubleTapLockChanged);
 
         addDivider(ctx, theme, dp, gGesture);
-        addSwitchRow(ctx, tf, host, theme, dp, gGesture, IC_BELL, "首页内嵌未读通知", "在对应常用应用名称下方显示最新消息摘要",
+        addSwitchRow(ctx, tf, host, theme, dp, gGesture, VectorGlyphView.IC_BELL, "首页内嵌未读通知", "在对应常用应用名称下方显示最新消息摘要",
                 prefs.getBoolean("inline_notif", true), host::onInlineNotifChanged);
 
         content.addView(gGesture);
 
-        // ==================== 分组 4：后台保活与权限体检（核心优化） ====================
-        addGroupTitle(ctx, tf, host, theme, dp, content, "后台保活与权限体检");
-        LinearLayout gHealth = makeGroupCard(ctx, theme, dp);
-
-        // 1. 默认桌面状态
-        statusRefreshers.add(addHealthCheckRow(ctx, tf, host, theme, dp, gHealth, IC_HOME,
-                "设为系统默认桌面", "确保按 Home 键或上滑秒回流光桌面",
-                () -> isDefaultHomeApp(ctx), "去设置", host::openHomeSettings));
-
-        addDivider(ctx, theme, dp, gHealth);
-
-        // 2. 后台常驻守护服务开关
-        addSwitchRow(ctx, tf, host, theme, dp, gHealth, IC_SHIELD,
-                "后台常驻守护服务", "防止系统回收桌面进程，实现退回桌面零重载",
-                prefs.getBoolean("keep_alive", true), on -> {
-                    host.onKeepAliveChanged(on);
-                    for (Runnable r : statusRefreshers) r.run();
-                });
-
-        addDivider(ctx, theme, dp, gHealth);
-
-        // 3. 忽略电池优化
-        statusRefreshers.add(addHealthCheckRow(ctx, tf, host, theme, dp, gHealth, IC_BATTERY,
-                "忽略电池优化（白名单）", "阻止后台省电策略冻结或延迟桌面唤醒",
-                () -> isIgnoringBatteryOpt(ctx), "去放行", host::openBatteryOptimizationSettings));
-
-        addDivider(ctx, theme, dp, gHealth);
-
-        // 4. 无障碍手势服务
-        statusRefreshers.add(addHealthCheckRow(ctx, tf, host, theme, dp, gHealth, IC_LOCK,
-                "无障碍手势服务", "驱动双击锁屏、单手拉通知栏与一键多任务后台",
-                GestureLockService::isRunning, "去开启", host::openAccessibilitySettings));
-
-        addDivider(ctx, theme, dp, gHealth);
-
-        // 5. 通知使用权
-        statusRefreshers.add(addHealthCheckRow(ctx, tf, host, theme, dp, gHealth, IC_BELL,
-                "通知使用权（兼系统级保活）", "驱动通知胶囊、音乐控制并让系统持久绑定进程",
-                () -> isNotificationListenerEnabled(ctx), "去授权", host::openNotificationListenerSettings));
-
-        addDivider(ctx, theme, dp, gHealth);
-
-        // ColorOS / 一加专属保活入口
-        addActionRow(ctx, tf, host, theme, dp, gHealth, IC_SHIELD,
-                "系统耗电与自启动详情", "ColorOS / 一加建议开启「允许完全后台行为」与「允许自启动」",
-                "前往", host::openAppDetailsSettings);
-
-        content.addView(gHealth);
-
-        // ==================== 分组 5：工具、隐私与备份 ====================
+        // ==================== 分组 4：工具、隐私与数据 ====================
         addGroupTitle(ctx, tf, host, theme, dp, content, "工具、隐私与数据");
         LinearLayout gTools = makeGroupCard(ctx, theme, dp);
 
-        addActionRow(ctx, tf, host, theme, dp, gTools, IC_NOTE, "桌面速记便签", "编辑或清空取件码与待办备忘", "", () -> {
+        addActionRow(ctx, tf, host, theme, dp, gTools, VectorGlyphView.IC_NOTE, "桌面速记便签", "编辑或清空取件码与待办备忘", "", () -> {
             dlg.dismiss();
             host.openStickyNoteEditor();
         });
 
         addDivider(ctx, theme, dp, gTools);
-        addActionRow(ctx, tf, host, theme, dp, gTools, IC_FOLDER, "新建胶囊文件夹", "将同类应用归纳到弹出式胶囊", "", () -> {
+        addActionRow(ctx, tf, host, theme, dp, gTools, VectorGlyphView.IC_FOLDER, "新建胶囊文件夹", "将同类应用归纳到弹出式胶囊", "", () -> {
             dlg.dismiss();
             host.openCreateFolder();
         });
 
         addDivider(ctx, theme, dp, gTools);
-        addActionRow(ctx, tf, host, theme, dp, gTools, IC_EYE_OFF, "已隐藏的应用", "查看并恢复隐藏的桌面应用",
+        addActionRow(ctx, tf, host, theme, dp, gTools, VectorGlyphView.IC_EYE_OFF, "已隐藏的应用", "查看并恢复隐藏的桌面应用",
                 host.getHiddenCount() + " 个", () -> {
             dlg.dismiss();
             host.openHiddenApps();
         });
 
         addDivider(ctx, theme, dp, gTools);
-        addSwitchRow(ctx, tf, host, theme, dp, gTools, IC_SHIELD, "隐藏应用生物识别锁", "查看隐藏应用前需验证指纹/面容或锁屏密码",
+        addSwitchRow(ctx, tf, host, theme, dp, gTools, VectorGlyphView.IC_SHIELD, "隐藏应用生物识别锁", "查看隐藏应用前需验证指纹/面容或锁屏密码",
                 prefs.getBoolean("biometric_hide", false), host::onBiometricHideChanged);
 
         addDivider(ctx, theme, dp, gTools);
-        addActionRow(ctx, tf, host, theme, dp, gTools, IC_BACKUP, "导出本地配置备份", "将常用、文件夹与外观偏好导出为 JSON", "", () -> {
+        addActionRow(ctx, tf, host, theme, dp, gTools, VectorGlyphView.IC_BACKUP, "导出本地配置备份", "将常用、文件夹与外观偏好导出为 JSON", "", () -> {
             dlg.dismiss();
             host.exportBackup();
         });
 
         addDivider(ctx, theme, dp, gTools);
-        addActionRow(ctx, tf, host, theme, dp, gTools, IC_BACKUP, "导入本地配置备份", "从 JSON 备份文件一键还原桌面布局", "", () -> {
+        addActionRow(ctx, tf, host, theme, dp, gTools, VectorGlyphView.IC_BACKUP, "导入本地配置备份", "从 JSON 备份文件一键还原桌面布局", "", () -> {
             dlg.dismiss();
             host.importBackup();
         });
@@ -589,6 +619,33 @@ final class SettingsSheetController {
         } catch (Throwable t) {
             return false;
         }
+    }
+
+    private static int countHealthyItems(Context ctx, SharedPreferences prefs) {
+        int ok = 0;
+        if (isDefaultHomeApp(ctx)) ok++;
+        if (prefs.getBoolean("keep_alive", true)) ok++;
+        if (isIgnoringBatteryOpt(ctx)) ok++;
+        if (GestureLockService.isRunning()) ok++;
+        if (isNotificationListenerEnabled(ctx)) ok++;
+        return ok;
+    }
+
+    private static void addExpandToggleRow(Context ctx, Typeface tf, Host host, AuroraTheme theme, float dp,
+                                           LinearLayout card, String label, final LinearLayout targetBox) {
+        addDivider(ctx, theme, dp, card);
+        LinearLayout row = makeBaseRow(ctx, dp);
+        TextView titleTv = makeText(ctx, tf, host.sp(13.2f), theme.accent, true, label);
+        row.addView(titleTv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        final TextView stateTv = makeText(ctx, tf, host.sp(12.2f), theme.textSecondary, false, "展开 ›");
+        row.addView(stateTv);
+        row.setOnClickListener(v -> {
+            v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+            boolean nextVis = targetBox.getVisibility() != View.VISIBLE;
+            targetBox.setVisibility(nextVis ? View.VISIBLE : View.GONE);
+            stateTv.setText(nextVis ? "收起 ▴" : "展开 ›");
+        });
+        card.addView(row);
     }
 
     // ---------- 现代设置卡片构建器 ----------
@@ -788,7 +845,7 @@ final class SettingsSheetController {
         bg.setCornerRadius(9 * dp);
         wrap.setBackground(bg);
 
-        SettingIconView iv = new SettingIconView(ctx, iconType, theme.accent, dp);
+        VectorGlyphView iv = new VectorGlyphView(ctx, iconType, theme.accent, dp);
         wrap.addView(iv, new FrameLayout.LayoutParams(Math.round(16 * dp), Math.round(16 * dp), Gravity.CENTER));
 
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(Math.round(28 * dp), Math.round(28 * dp));
@@ -821,156 +878,5 @@ final class SettingsSheetController {
         tv.setTypeface(bold ? Typeface.create(tf, Typeface.BOLD) : tf);
         tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp);
         return tv;
-    }
-
-    // ---------- 极简线性矢量图标 ----------
-    private static final class SettingIconView extends View {
-        private final int type;
-        private final float dp;
-        private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final RectF r = new RectF();
-        private final Path path = new Path();
-
-        SettingIconView(Context ctx, int type, int color, float dp) {
-            super(ctx);
-            this.type = type;
-            this.dp = dp;
-            p.setColor(color);
-            p.setStyle(Paint.Style.STROKE);
-            p.setStrokeWidth(1.45f * dp);
-            p.setStrokeCap(Paint.Cap.ROUND);
-            p.setStrokeJoin(Paint.Join.ROUND);
-        }
-
-        @Override
-        protected void onDraw(Canvas c) {
-            float w = getWidth(), h = getHeight();
-            float cx = w * 0.5f, cy = h * 0.5f;
-            float u = Math.min(w, h) * 0.36f;
-
-            switch (type) {
-                case IC_WALLPAPER:
-                case IC_CARD:
-                    r.set(cx - u, cy - u * 0.85f, cx + u, cy + u * 0.85f);
-                    c.drawRoundRect(r, 2.2f * dp, 2.2f * dp, p);
-                    c.drawLine(cx - u * 0.6f, cy + u * 0.35f, cx - u * 0.1f, cy - u * 0.15f, p);
-                    c.drawLine(cx - u * 0.1f, cy - u * 0.15f, cx + u * 0.6f, cy + u * 0.35f, p);
-                    break;
-                case IC_SUN:
-                    c.drawCircle(cx, cy, u * 0.48f, p);
-                    for (int i = 0; i < 8; i++) {
-                        double a = Math.toRadians(i * 45);
-                        c.drawLine(cx + (float) Math.cos(a) * u * 0.72f, cy + (float) Math.sin(a) * u * 0.72f,
-                                cx + (float) Math.cos(a) * u * 1.02f, cy + (float) Math.sin(a) * u * 1.02f, p);
-                    }
-                    break;
-                case IC_STAR:
-                case IC_SPARK:
-                    path.reset();
-                    path.moveTo(cx, cy - u);
-                    path.lineTo(cx + u * 0.28f, cy - u * 0.28f);
-                    path.lineTo(cx + u, cy);
-                    path.lineTo(cx + u * 0.28f, cy + u * 0.28f);
-                    path.lineTo(cx, cy + u);
-                    path.lineTo(cx - u * 0.28f, cy + u * 0.28f);
-                    path.lineTo(cx - u, cy);
-                    path.lineTo(cx - u * 0.28f, cy - u * 0.28f);
-                    path.close();
-                    c.drawPath(path, p);
-                    break;
-                case IC_SHAPES:
-                    r.set(cx - u, cy - u, cx - 1f * dp, cy - 1f * dp);
-                    c.drawRoundRect(r, 1.5f * dp, 1.5f * dp, p);
-                    r.set(cx + 1f * dp, cy - u, cx + u, cy - 1f * dp);
-                    c.drawOval(r, p);
-                    r.set(cx - u, cy + 1f * dp, cx - 1f * dp, cy + u);
-                    c.drawOval(r, p);
-                    r.set(cx + 1f * dp, cy + 1f * dp, cx + u, cy + u);
-                    c.drawRoundRect(r, 1.5f * dp, 1.5f * dp, p);
-                    break;
-                case IC_FONT:
-                    c.drawLine(cx - u * 0.85f, cy - u * 0.75f, cx + u * 0.85f, cy - u * 0.75f, p);
-                    c.drawLine(cx, cy - u * 0.75f, cx, cy + u * 0.85f, p);
-                    break;
-                case IC_CLOCK:
-                    c.drawCircle(cx, cy, u, p);
-                    c.drawLine(cx, cy, cx, cy - u * 0.52f, p);
-                    c.drawLine(cx, cy, cx + u * 0.45f, cy + u * 0.2f, p);
-                    break;
-                case IC_SORT:
-                case IC_DENSITY:
-                    c.drawLine(cx - u, cy - u * 0.6f, cx + u, cy - u * 0.6f, p);
-                    c.drawLine(cx - u, cy, cx + u * 0.6f, cy, p);
-                    c.drawLine(cx - u, cy + u * 0.6f, cx + u * 0.25f, cy + u * 0.6f, p);
-                    break;
-                case IC_BATTERY:
-                    r.set(cx - u, cy - u * 0.58f, cx + u * 0.82f, cy + u * 0.58f);
-                    c.drawRoundRect(r, 2f * dp, 2f * dp, p);
-                    c.drawLine(cx + u * 1.05f, cy - u * 0.24f, cx + u * 1.05f, cy + u * 0.24f, p);
-                    break;
-                case IC_LOCK:
-                    r.set(cx - u * 0.78f, cy - u * 0.1f, cx + u * 0.78f, cy + u * 0.9f);
-                    c.drawRoundRect(r, 2f * dp, 2f * dp, p);
-                    r.set(cx - u * 0.45f, cy - u * 0.85f, cx + u * 0.45f, cy + u * 0.1f);
-                    c.drawArc(r, 180, 180, false, p);
-                    break;
-                case IC_BELL:
-                    r.set(cx - u * 0.7f, cy - u * 0.8f, cx + u * 0.7f, cy + u * 0.55f);
-                    c.drawArc(r, 180, 180, false, p);
-                    c.drawLine(cx - u * 0.7f, cy - u * 0.12f, cx - u * 0.7f, cy + u * 0.52f, p);
-                    c.drawLine(cx + u * 0.7f, cy - u * 0.12f, cx + u * 0.7f, cy + u * 0.52f, p);
-                    c.drawLine(cx - u * 0.95f, cy + u * 0.52f, cx + u * 0.95f, cy + u * 0.52f, p);
-                    c.drawLine(cx - u * 0.22f, cy + u * 0.85f, cx + u * 0.22f, cy + u * 0.85f, p);
-                    break;
-                case IC_SHIELD:
-                    path.reset();
-                    path.moveTo(cx, cy - u);
-                    path.lineTo(cx + u * 0.85f, cy - u * 0.55f);
-                    path.lineTo(cx + u * 0.72f, cy + u * 0.35f);
-                    path.lineTo(cx, cy + u);
-                    path.lineTo(cx - u * 0.72f, cy + u * 0.35f);
-                    path.lineTo(cx - u * 0.85f, cy - u * 0.55f);
-                    path.close();
-                    c.drawPath(path, p);
-                    break;
-                case IC_HOME:
-                    path.reset();
-                    path.moveTo(cx - u, cy - u * 0.05f);
-                    path.lineTo(cx, cy - u * 0.95f);
-                    path.lineTo(cx + u, cy - u * 0.05f);
-                    c.drawPath(path, p);
-                    r.set(cx - u * 0.65f, cy - u * 0.15f, cx + u * 0.65f, cy + u * 0.85f);
-                    c.drawRect(r, p);
-                    break;
-                case IC_FOLDER:
-                    path.reset();
-                    path.moveTo(cx - u, cy - u * 0.65f);
-                    path.lineTo(cx - u * 0.18f, cy - u * 0.65f);
-                    path.lineTo(cx + u * 0.05f, cy - u * 0.35f);
-                    path.lineTo(cx + u, cy - u * 0.35f);
-                    path.lineTo(cx + u, cy + u * 0.72f);
-                    path.lineTo(cx - u, cy + u * 0.72f);
-                    path.close();
-                    c.drawPath(path, p);
-                    break;
-                case IC_EYE_OFF:
-                    c.drawOval(cx - u, cy - u * 0.55f, cx + u, cy + u * 0.55f, p);
-                    c.drawLine(cx - u * 0.85f, cy + u * 0.85f, cx + u * 0.85f, cy - u * 0.85f, p);
-                    break;
-                case IC_BACKUP:
-                    c.drawLine(cx, cy - u * 0.85f, cx, cy + u * 0.45f, p);
-                    c.drawLine(cx - u * 0.45f, cy, cx, cy + u * 0.45f, p);
-                    c.drawLine(cx + u * 0.45f, cy, cx, cy + u * 0.45f, p);
-                    c.drawLine(cx - u * 0.85f, cy + u * 0.85f, cx + u * 0.85f, cy + u * 0.85f, p);
-                    break;
-                case IC_SEARCH:
-                    c.drawCircle(cx - u * 0.18f, cy - u * 0.18f, u * 0.65f, p);
-                    c.drawLine(cx + u * 0.28f, cy + u * 0.28f, cx + u * 0.92f, cy + u * 0.92f, p);
-                    break;
-                default:
-                    c.drawCircle(cx, cy, u * 0.75f, p);
-                    break;
-            }
-        }
     }
 }

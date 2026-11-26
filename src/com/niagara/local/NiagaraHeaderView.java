@@ -81,16 +81,14 @@ final class NiagaraHeaderView extends LinearLayout {
     private final ImageView mediaArtView;
     private final TextView mediaTitleView;
     private final TextView mediaSubtitleView;
-    private final HeaderGlyphView mediaPlayGlyph;
+    private final VectorGlyphView mediaPlayGlyph;
     private final View mediaProgressFill;
-    private final TextView mediaTimeView;
 
     private final LinearLayout homeWidgetsBox;
     private final View gravitySpacer;
 
     NiagaraHeaderView(Context ctx, AuroraTheme theme, Typeface typeface, float textScale,
-                      int clockStyle, boolean use24h, boolean statusFull, boolean smartBatteryOnly,
-                      boolean heroHighContrast, final Callbacks cb) {
+                      int clockStyle, boolean use24h, int statusBarMode, final Callbacks cb) {
         super(ctx);
         this.dp = ctx.getResources().getDisplayMetrics().density;
         this.theme = theme;
@@ -139,15 +137,12 @@ final class NiagaraHeaderView extends LinearLayout {
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         // 3. 无边框极简天气 + 按需电量状态条
-        heroStatusBar = new HeroStatusBarView(ctx, theme, this.typeface, textScale, statusFull,
+        heroStatusBar = new HeroStatusBarView(ctx, theme, this.typeface, textScale, statusBarMode,
                 new HeroStatusBarView.Callbacks() {
                     @Override public void onWeatherClick() { if (cb != null) cb.onWeatherClick(); }
                     @Override public void onDeviceStatusClick() { if (cb != null) cb.onDeviceStatusClick(); }
                     @Override public void onLongPress() { if (cb != null) cb.onLongPress(); }
                 });
-        heroStatusBar.setSmartBatteryOnly(smartBatteryOnly);
-        heroStatusBar.setAestheticStyle(heroHighContrast
-                ? HeroStatusBarView.STYLE_HIGH_CONTRAST : HeroStatusBarView.STYLE_AIRY);
         LayoutParams hsLp = new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         hsLp.topMargin = dp(4);
         contentBox.addView(heroStatusBar, hsLp);
@@ -158,7 +153,7 @@ final class NiagaraHeaderView extends LinearLayout {
         agendaRow.setGravity(Gravity.CENTER_VERTICAL);
         agendaRow.setPadding(dp(2), dp(5), dp(4), dp(2));
         agendaRow.setVisibility(View.GONE);
-        HeaderGlyphView agendaIc = new HeaderGlyphView(ctx, HeaderGlyphView.GLYPH_CALENDAR,
+        VectorGlyphView agendaIc = new VectorGlyphView(ctx, VectorGlyphView.IC_CALENDAR,
                 theme.isLight ? 0xAA141824 : 0xCCF1F5F9, dp);
         LayoutParams aicLp = new LayoutParams(dp(14), dp(14));
         aicLp.rightMargin = dp(6);
@@ -179,7 +174,7 @@ final class NiagaraHeaderView extends LinearLayout {
         noteRow.setGravity(Gravity.CENTER_VERTICAL);
         noteRow.setPadding(dp(2), dp(4), dp(4), dp(2));
         noteRow.setVisibility(View.GONE);
-        HeaderGlyphView noteIc = new HeaderGlyphView(ctx, HeaderGlyphView.GLYPH_NOTE, theme.accent, dp);
+        VectorGlyphView noteIc = new VectorGlyphView(ctx, VectorGlyphView.IC_NOTE, theme.accent, dp);
         LayoutParams nicLp = new LayoutParams(dp(14), dp(14));
         nicLp.rightMargin = dp(6);
         noteRow.addView(noteIc, nicLp);
@@ -226,15 +221,15 @@ final class NiagaraHeaderView extends LinearLayout {
         mediaTop.addView(mediaMeta, new LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
         int ctrlColor = theme.isLight ? 0xD9141824 : 0xEDF8FAFC;
-        mediaTop.addView(makeMediaBtn(ctx, HeaderGlyphView.GLYPH_PREV, ctrlColor, () -> {
+        mediaTop.addView(makeMediaBtn(ctx, VectorGlyphView.IC_PREV, ctrlColor, () -> {
             if (cb != null) cb.onMediaTransport(0);
         }));
-        FrameLayout playWrap = makeMediaBtn(ctx, HeaderGlyphView.GLYPH_PLAY, theme.accent, () -> {
+        FrameLayout playWrap = makeMediaBtn(ctx, VectorGlyphView.IC_PLAY, theme.accent, () -> {
             if (cb != null) cb.onMediaTransport(1);
         });
-        mediaPlayGlyph = (HeaderGlyphView) playWrap.getChildAt(0);
+        mediaPlayGlyph = (VectorGlyphView) playWrap.getChildAt(0);
         mediaTop.addView(playWrap);
-        mediaTop.addView(makeMediaBtn(ctx, HeaderGlyphView.GLYPH_NEXT, ctrlColor, () -> {
+        mediaTop.addView(makeMediaBtn(ctx, VectorGlyphView.IC_NEXT, ctrlColor, () -> {
             if (cb != null) cb.onMediaTransport(2);
         }));
 
@@ -259,12 +254,6 @@ final class NiagaraHeaderView extends LinearLayout {
         LayoutParams trLp = new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(2));
         trLp.topMargin = dp(7);
         mediaBar.addView(track, trLp);
-
-        mediaTimeView = makeSubText(ctx, 10.5f, theme.textSecondary, false);
-        mediaTimeView.setFontFeatureSettings("tnum");
-        mediaTimeView.setPadding(0, dp(3), 0, 0);
-        mediaTimeView.setVisibility(View.GONE);
-        mediaBar.addView(mediaTimeView);
 
         if (cb != null) {
             mediaBar.setOnClickListener(v -> cb.onMediaClick());
@@ -291,7 +280,7 @@ final class NiagaraHeaderView extends LinearLayout {
 
     private FrameLayout makeMediaBtn(Context ctx, int glyphType, int color, final Runnable onClick) {
         FrameLayout wrap = new FrameLayout(ctx);
-        HeaderGlyphView gv = new HeaderGlyphView(ctx, glyphType, color, dp);
+        VectorGlyphView gv = new VectorGlyphView(ctx, glyphType, color, dp);
         wrap.addView(gv, new FrameLayout.LayoutParams(dp(16), dp(16), Gravity.CENTER));
         wrap.setLayoutParams(new LayoutParams(dp(34), dp(34)));
         wrap.setClickable(true);
@@ -368,17 +357,8 @@ final class NiagaraHeaderView extends LinearLayout {
         mainClockView.setFormat12Hour(fmt);
     }
 
-    void setSmartBatteryOnly(boolean smartOnly) {
-        heroStatusBar.setSmartBatteryOnly(smartOnly);
-    }
-
-    void setStatusBarFullMode(boolean full) {
-        heroStatusBar.setFullMode(full);
-    }
-
-    void setHeroHighContrast(boolean highContrast) {
-        heroStatusBar.setAestheticStyle(highContrast
-                ? HeroStatusBarView.STYLE_HIGH_CONTRAST : HeroStatusBarView.STYLE_AIRY);
+    void setStatusBarMode(int mode) {
+        heroStatusBar.setStatusBarMode(mode);
     }
 
     void applyTextScale(float scale) {
@@ -444,22 +424,14 @@ final class NiagaraHeaderView extends LinearLayout {
         }
         mediaTitleView.setText(title);
         mediaSubtitleView.setText(TextUtils.isEmpty(artist) ? "正在播放" : artist);
-        mediaPlayGlyph.setGlyphType(playing ? HeaderGlyphView.GLYPH_PAUSE : HeaderGlyphView.GLYPH_PLAY);
+        mediaPlayGlyph.setGlyphType(playing ? VectorGlyphView.IC_PAUSE : VectorGlyphView.IC_PLAY);
         if (durMs > 0) {
             long clamped = Math.max(0L, Math.min(posMs, durMs));
             mediaProgressFill.setScaleX(clamped / (float) durMs);
-            mediaTimeView.setText(formatMmSs(clamped) + " / " + formatMmSs(durMs));
-            mediaTimeView.setVisibility(View.VISIBLE);
         } else {
             mediaProgressFill.setScaleX(0f);
-            mediaTimeView.setVisibility(View.GONE);
         }
         mediaBar.setVisibility(View.VISIBLE);
-    }
-
-    private static String formatMmSs(long ms) {
-        long s = Math.max(0, ms / 1000);
-        return String.format(Locale.ROOT, "%02d:%02d", s / 60, s % 60);
     }
 
     /** 随搜索过渡进度 0→1 平滑上移淡出，不抢先设 GONE，让动画完整呈现。 */
@@ -476,10 +448,6 @@ final class NiagaraHeaderView extends LinearLayout {
 
     LinearLayout getWidgetsContainer() {
         return homeWidgetsBox;
-    }
-
-    int getClockHeight() {
-        return mainClockView.getHeight();
     }
 
     int measureContentHeightWithoutSpacer(int widthPx) {
@@ -505,98 +473,5 @@ final class NiagaraHeaderView extends LinearLayout {
 
     boolean hasPinnedWidgetsVisible() {
         return homeWidgetsBox.getVisibility() == View.VISIBLE && homeWidgetsBox.getChildCount() > 0;
-    }
-
-    // ---------- 顶部极简矢量图标（零 Emoji） ----------
-    private static final class HeaderGlyphView extends View {
-        static final int GLYPH_CALENDAR = 0;
-        static final int GLYPH_NOTE = 1;
-        static final int GLYPH_PREV = 2;
-        static final int GLYPH_PLAY = 3;
-        static final int GLYPH_PAUSE = 4;
-        static final int GLYPH_NEXT = 5;
-
-        private int glyphType;
-        private final float dp;
-        private final Paint strokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint fillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final RectF rect = new RectF();
-        private final Path path = new Path();
-
-        HeaderGlyphView(Context ctx, int type, int color, float dp) {
-            super(ctx);
-            this.glyphType = type;
-            this.dp = dp;
-            strokePaint.setColor(color);
-            strokePaint.setStyle(Paint.Style.STROKE);
-            strokePaint.setStrokeWidth(1.35f * dp);
-            strokePaint.setStrokeCap(Paint.Cap.ROUND);
-            strokePaint.setStrokeJoin(Paint.Join.ROUND);
-            fillPaint.setColor(color);
-            fillPaint.setStyle(Paint.Style.FILL);
-        }
-
-        void setGlyphType(int type) {
-            if (this.glyphType != type) {
-                this.glyphType = type;
-                invalidate();
-            }
-        }
-
-        @Override
-        protected void onDraw(Canvas c) {
-            float w = getWidth(), h = getHeight();
-            float cx = w * 0.5f, cy = h * 0.5f;
-            float u = Math.min(w, h) * 0.36f;
-
-            switch (glyphType) {
-                case GLYPH_CALENDAR:
-                    rect.set(cx - u, cy - u * 0.78f, cx + u, cy + u * 0.92f);
-                    c.drawRoundRect(rect, 2f * dp, 2f * dp, strokePaint);
-                    c.drawLine(cx - u, cy - u * 0.22f, cx + u, cy - u * 0.22f, strokePaint);
-                    c.drawLine(cx - u * 0.45f, cy - u * 1.05f, cx - u * 0.45f, cy - u * 0.55f, strokePaint);
-                    c.drawLine(cx + u * 0.45f, cy - u * 1.05f, cx + u * 0.45f, cy - u * 0.55f, strokePaint);
-                    break;
-                case GLYPH_NOTE:
-                    rect.set(cx - u * 0.85f, cy - u * 0.92f, cx + u * 0.85f, cy + u * 0.92f);
-                    c.drawRoundRect(rect, 2f * dp, 2f * dp, strokePaint);
-                    c.drawLine(cx - u * 0.45f, cy - u * 0.28f, cx + u * 0.45f, cy - u * 0.28f, strokePaint);
-                    c.drawLine(cx - u * 0.45f, cy + u * 0.26f, cx + u * 0.22f, cy + u * 0.26f, strokePaint);
-                    break;
-                case GLYPH_PREV:
-                    c.drawLine(cx - u * 0.72f, cy - u * 0.72f, cx - u * 0.72f, cy + u * 0.72f, strokePaint);
-                    path.reset();
-                    path.moveTo(cx + u * 0.72f, cy - u * 0.72f);
-                    path.lineTo(cx - u * 0.35f, cy);
-                    path.lineTo(cx + u * 0.72f, cy + u * 0.72f);
-                    path.close();
-                    c.drawPath(path, fillPaint);
-                    break;
-                case GLYPH_NEXT:
-                    c.drawLine(cx + u * 0.72f, cy - u * 0.72f, cx + u * 0.72f, cy + u * 0.72f, strokePaint);
-                    path.reset();
-                    path.moveTo(cx - u * 0.72f, cy - u * 0.72f);
-                    path.lineTo(cx + u * 0.35f, cy);
-                    path.lineTo(cx - u * 0.72f, cy + u * 0.72f);
-                    path.close();
-                    c.drawPath(path, fillPaint);
-                    break;
-                case GLYPH_PAUSE:
-                    rect.set(cx - u * 0.68f, cy - u * 0.78f, cx - u * 0.18f, cy + u * 0.78f);
-                    c.drawRoundRect(rect, 1.2f * dp, 1.2f * dp, fillPaint);
-                    rect.set(cx + u * 0.18f, cy - u * 0.78f, cx + u * 0.68f, cy + u * 0.78f);
-                    c.drawRoundRect(rect, 1.2f * dp, 1.2f * dp, fillPaint);
-                    break;
-                case GLYPH_PLAY:
-                default:
-                    path.reset();
-                    path.moveTo(cx - u * 0.55f, cy - u * 0.82f);
-                    path.lineTo(cx + u * 0.82f, cy);
-                    path.lineTo(cx - u * 0.55f, cy + u * 0.82f);
-                    path.close();
-                    c.drawPath(path, fillPaint);
-                    break;
-            }
-        }
     }
 }

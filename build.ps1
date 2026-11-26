@@ -11,8 +11,8 @@ New-Item -ItemType Directory -Force -Path "$ProjectRoot\build\gen","$ProjectRoot
 
 [xml]$manifest = Get-Content "$ProjectRoot\AndroidManifest.xml"
 $manifest.manifest.package = 'com.niagara.local'
-$manifest.manifest.SetAttribute('android:versionCode','280')
-$manifest.manifest.SetAttribute('android:versionName','2.8.0')
+$manifest.manifest.SetAttribute('android:versionCode','290')
+$manifest.manifest.SetAttribute('android:versionName','2.9.0')
 $manifest.Save("$ProjectRoot\AndroidManifest.xml")
 
 function Build-Variant($Pkg, $OutApk) {
@@ -54,8 +54,8 @@ function Build-Variant($Pkg, $OutApk) {
     Copy-Item "$ProjectRoot\build\$OutApk" "$outDir\$OutApk" -Force
 }
 
-Build-Variant 'com.niagara.loca2' '极简桌面-v2.8.0-direct.apk'
-Build-Variant 'com.niagara.local' '极简桌面-v2.8.0.apk'
-Copy-Item "$ProjectRoot\build\极简桌面-v2.8.0.apk" "D:\NiagaraProject\极简桌面.apk" -Force
+Build-Variant 'com.niagara.loca2' '极简桌面-v2.9.0-direct.apk'
+Build-Variant 'com.niagara.local' '极简桌面-v2.9.0.apk'
+Copy-Item "$ProjectRoot\build\极简桌面-v2.9.0.apk" "D:\NiagaraProject\极简桌面.apk" -Force
 Remove-Item -Recurse -Force "$ProjectRoot\build" -ErrorAction SilentlyContinue
 Write-Host "Build finished."

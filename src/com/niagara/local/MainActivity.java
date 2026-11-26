@@ -236,13 +236,11 @@ public class MainActivity extends Activity {
     private static final String K_PULL_DOWN_SEARCH = "pull_down_search_v1";
     private static final String K_COIN_LEFT = "coin_left_v1";
     private static final String K_WALL_STYLE_IDX = "wall_style_idx";
-    private static final String K_WALL_APPLIED_NIGHT = "wall_applied_night";
     private static final String K_FONT_IDX = "font_idx";
     private static final String K_TEXT_SCALE = "text_scale";
     private static final String K_ROW_DENSITY = "row_density";
     private static final String K_USE_24H = "use_24h";
     private static final String K_CLOCK_STYLE = "clock_style_v1";
-    private static final String K_AUTO_HIDE_WAVE = "auto_hide_wave";
     private static final String K_WAVE_ADAPTIVE_ALPHA = "wave_adaptive_alpha_v1";
     private static final String K_PULL_LAUNCH = "pull_launch";
     private static final String K_INLINE_NOTIF = "inline_notif";
@@ -250,13 +248,9 @@ public class MainActivity extends Activity {
     private static final String K_SHOW_MEDIA = "show_media";
     private static final String K_SHOW_AGENDA = "show_agenda";
     private static final String K_DOUBLE_TAP_LOCK = "double_tap_lock";
-    private static final String K_SWIPE_DOWN_NOTIF = "swipe_down_notif";
     private static final String K_BIOMETRIC_HIDE = "biometric_hide";
     private static final String K_KEEP_ALIVE = "keep_alive";
-    private static final String K_SORT_BY_USAGE = "sort_by_usage";
-    private static final String K_SMART_BATTERY = "smart_battery_only_v1";
-    private static final String K_STATUS_BAR_FULL = "status_bar_full_v1";
-    private static final String K_HERO_HIGH_CONTRAST = "hero_high_contrast_v1";
+    private static final String K_STATUS_BAR_MODE = "status_bar_mode_v1";
     private static final String K_WAVE_IDLE_DOTS = "wave_idle_dots_v1";
     private static final String K_ICON_PACK = "icon_pack_pkg_v1";
     private static final String K_CUSTOM_ICONS = "custom_app_icons_v1";
@@ -304,11 +298,7 @@ public class MainActivity extends Activity {
     private static final String[] FONT_FAMILIES = {"sans-serif-light", "sans-serif", "sans-serif-medium", "serif", "monospace"};
     private static final String[] DENSITY_NAMES = {"紧凑灵巧", "黄金舒适", "舒展宽松"};
 
-    static volatile MainActivity activeInstance;
-    static volatile boolean wasOnHomeBeforeLock = true;
     static volatile boolean hasWindowFocusNow = false;
-    static volatile boolean launchedExternalApp = false;
-    static volatile long lastPauseUptime = 0;
 
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
     private final List<AppEntry> allApps = new ArrayList<>();
@@ -339,6 +329,7 @@ public class MainActivity extends Activity {
     private NiagaraHeaderView niagaraHeaderView;
     private LinearLayout searchBarCard;
     private EditText searchInput;
+    private FrameLayout searchPasteBtn;
     private ListView streamListView;
     private StreamAdapter streamAdapter;
     private NiagaraWaveView rightWaveBar, leftGhostWaveBar;
@@ -397,7 +388,6 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-        activeInstance = this;
         super.onCreate(savedInstanceState);
         prefs = getSharedPreferences(PREF_FILE, MODE_PRIVATE);
         launcherApps = (LauncherApps) getSystemService(LAUNCHER_APPS_SERVICE);
@@ -487,28 +477,8 @@ public class MainActivity extends Activity {
         super.onWindowFocusChanged(hasFocus);
         hasWindowFocusNow = hasFocus;
         if (hasFocus) {
-            wasOnHomeBeforeLock = true;
-            launchedExternalApp = false;
             resetLockFlags();
         }
-    }
-
-    void requestDismissStuckKeyguard() {
-        uiHandler.post(() -> {
-            try {
-                KeyguardManager km = (KeyguardManager) getSystemService(KEYGUARD_SERVICE);
-                if (km != null && km.isDeviceLocked()) return;
-                if (Build.VERSION.SDK_INT >= 27) {
-                    setShowWhenLocked(true);
-                    setTurnScreenOn(true);
-                } else {
-                    getWindow().addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
-                            | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
-                            | WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD);
-                }
-                if (km != null) km.requestDismissKeyguard(this, null);
-            } catch (Throwable ignored) {}
-        });
     }
 
     void resetLockFlags() {
@@ -569,8 +539,6 @@ public class MainActivity extends Activity {
         super.onResume();
         isResumed = true;
         lastResumeUptime = SystemClock.uptimeMillis();
-        wasOnHomeBeforeLock = true;
-        launchedExternalApp = false;
 
         AuroraTheme latestTheme = AuroraTheme.resolve(this, prefs.getInt(K_THEME_IDX, AuroraTheme.IDX_DEFAULT));
         if (latestTheme.isLight != lastResolvedLightState) {
@@ -589,14 +557,6 @@ public class MainActivity extends Activity {
         isResumed = false;
         if (popupController != null) popupController.dismiss(false);
         uiHandler.removeCallbacks(resumeRefreshTask);
-        lastPauseUptime = SystemClock.uptimeMillis();
-        PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
-        KeyguardManager km = (KeyguardManager) getSystemService(KEYGUARD_SERVICE);
-        boolean locking = GestureLockService.wasJustLocked()
-                || (SystemClock.uptimeMillis() - lastDoubleTapLock < 4500)
-                || (pm != null && !pm.isInteractive())
-                || (km != null && km.isKeyguardLocked());
-        wasOnHomeBeforeLock = locking || !launchedExternalApp;
         if (backdropView != null) backdropView.setScreenVisible(false);
         uiHandler.removeCallbacks(mediaProgressTicker);
         uiHandler.removeCallbacks(refreshNotificationsTask);
@@ -605,7 +565,6 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
-        if (activeInstance == this) activeInstance = null;
         super.onDestroy();
         if (dateReceiverRegistered) {
             try { unregisterReceiver(dateChangeReceiver); } catch (Throwable ignored) {}
@@ -699,9 +658,7 @@ public class MainActivity extends Activity {
                 textScale,
                 prefs.getInt(K_CLOCK_STYLE, NiagaraHeaderView.CLOCK_CLASSIC),
                 prefs.getBoolean(K_USE_24H, true),
-                prefs.getBoolean(K_STATUS_BAR_FULL, false),
-                prefs.getBoolean(K_SMART_BATTERY, true),
-                prefs.getBoolean(K_HERO_HIGH_CONTRAST, false),
+                resolveStatusBarMode(),
                 new NiagaraHeaderView.Callbacks() {
                     @Override public void onClockClick() {
                         if (searchActive || inAllAppsMode) returnToHomeFavorites();
@@ -792,13 +749,12 @@ public class MainActivity extends Activity {
         leftGhostWaveBar.setSilentAtRest(true);
         leftGhostWaveBar.setVisibility(View.VISIBLE);
 
-        boolean autoHideWave = prefs.getBoolean(K_AUTO_HIDE_WAVE, false);
         boolean idleDots = prefs.getBoolean(K_WAVE_IDLE_DOTS, true);
         boolean pullLaunch = prefs.getBoolean(K_PULL_LAUNCH, true);
-        rightWaveBar.bindStyle(theme, typeface, autoHideWave);
+        rightWaveBar.bindStyle(theme, typeface);
         rightWaveBar.setIdleDotsMode(idleDots);
         rightWaveBar.setPullLaunchEnabled(pullLaunch);
-        leftGhostWaveBar.bindStyle(theme, typeface, autoHideWave);
+        leftGhostWaveBar.bindStyle(theme, typeface);
         leftGhostWaveBar.setIdleDotsMode(idleDots);
         leftGhostWaveBar.setPullLaunchEnabled(pullLaunch);
 
@@ -1477,13 +1433,13 @@ public class MainActivity extends Activity {
         LinearLayout inputRow = new LinearLayout(this);
         inputRow.setGravity(Gravity.CENTER_VERTICAL);
 
-        SearchGlyphView searchIc = new SearchGlyphView(this, SearchGlyphView.IC_SEARCH, theme.accent, dpUnit);
+        VectorGlyphView searchIc = new VectorGlyphView(this, VectorGlyphView.IC_SEARCH, theme.accent, dpUnit);
         LinearLayout.LayoutParams sicLp = new LinearLayout.LayoutParams(dp(18), dp(18));
         sicLp.rightMargin = dp(10);
         inputRow.addView(searchIc, sicLp);
 
         searchInput = new EditText(this);
-        searchInput.setHint("搜应用 / 拼音 / 快捷方式 / 算式 / 换算");
+        searchInput.setHint("搜索应用、算式或网页…");
         searchInput.setHintTextColor((theme.textSecondary & 0x00FFFFFF) | 0x88000000);
         searchInput.setTextColor(theme.textPrimary);
         searchInput.setTypeface(typeface);
@@ -1496,7 +1452,7 @@ public class MainActivity extends Activity {
         inputRow.addView(searchInput, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
         FrameLayout pasteWrap = new FrameLayout(this);
-        pasteWrap.addView(new SearchGlyphView(this, SearchGlyphView.IC_CLIPBOARD, theme.textSecondary, dpUnit),
+        pasteWrap.addView(new VectorGlyphView(this, VectorGlyphView.IC_CLIPBOARD, theme.textSecondary, dpUnit),
                 new FrameLayout.LayoutParams(dp(16), dp(16), Gravity.CENTER));
         pasteWrap.setOnClickListener(v -> {
             ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
@@ -1510,10 +1466,12 @@ public class MainActivity extends Activity {
             }
             Toast.makeText(this, "剪贴板为空", Toast.LENGTH_SHORT).show();
         });
+        pasteWrap.setVisibility(View.GONE);
+        searchPasteBtn = pasteWrap;
         inputRow.addView(pasteWrap, new LinearLayout.LayoutParams(dp(34), dp(34)));
 
         FrameLayout closeWrap = new FrameLayout(this);
-        closeWrap.addView(new SearchGlyphView(this, SearchGlyphView.IC_CLOSE, theme.textSecondary, dpUnit),
+        closeWrap.addView(new VectorGlyphView(this, VectorGlyphView.IC_CLOSE, theme.textSecondary, dpUnit),
                 new FrameLayout.LayoutParams(dp(15), dp(15), Gravity.CENTER));
         closeWrap.setOnClickListener(v -> {
             if (searchInput.getText().length() > 0) {
@@ -1528,7 +1486,10 @@ public class MainActivity extends Activity {
         searchInput.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
-            @Override public void afterTextChanged(Editable s) { rebuildStreamRows(); }
+            @Override public void afterTextChanged(Editable s) {
+                updateSearchPasteVisibility();
+                rebuildStreamRows();
+            }
         });
 
         searchInput.setOnEditorActionListener((v, actionId, event) -> {
@@ -1541,6 +1502,21 @@ public class MainActivity extends Activity {
         });
 
         return box;
+    }
+
+    private void updateSearchPasteVisibility() {
+        if (searchPasteBtn == null) return;
+        boolean emptyQuery = searchInput == null || searchInput.getText().length() == 0;
+        boolean hasTextClip = false;
+        if (emptyQuery) {
+            ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            if (cm != null && cm.hasPrimaryClip()) {
+                android.content.ClipDescription desc = cm.getPrimaryClipDescription();
+                hasTextClip = desc != null && (desc.hasMimeType(android.content.ClipDescription.MIMETYPE_TEXT_PLAIN)
+                        || desc.hasMimeType(android.content.ClipDescription.MIMETYPE_TEXT_HTML));
+            }
+        }
+        searchPasteBtn.setVisibility(hasTextClip ? View.VISIBLE : View.GONE);
     }
 
     /** 回车智能执行最底端（距离拇指最近）的首个有效搜索结果：计算复制 / 应用启动 / 快捷方式 / 网页搜索。 */
@@ -1587,12 +1563,10 @@ public class MainActivity extends Activity {
 
     private void startSearchShortcut(ShortcutInfo sc, AppEntry owner) {
         try {
-            launchedExternalApp = true;
             launcherApps.startShortcut(sc, null, null);
             hideSoftKeyboard();
             uiHandler.postDelayed(() -> { if (searchActive) closeInstantSearch(); }, 350);
         } catch (Throwable t) {
-            launchedExternalApp = false;
             if (owner != null) launchApp(owner);
         }
     }
@@ -1602,6 +1576,7 @@ public class MainActivity extends Activity {
             searchActive = true;
             searchBarCard.setVisibility(View.VISIBLE);
             searchBarCard.bringToFront();
+            updateSearchPasteVisibility();
             updateFirstPageExtrasVisibility();
             rebuildStreamRows();
             if (streamListView != null && streamListView.getCount() > 0) {
@@ -1706,12 +1681,12 @@ public class MainActivity extends Activity {
         final Dialog[] holder = new Dialog[1];
         final Runnable dismiss = () -> { if (holder[0] != null) holder[0].dismiss(); };
 
-        box.addView(makeText("🌤 开启首页实时天气", 18.5f, theme.textPrimary, true));
+        box.addView(makeText("开启首页实时天气", 18.5f, theme.textPrimary, true));
         TextView sub = makeText("授权定位后即可在首页顶部直接显示实时温度与天气图标，也可授权读取系统通知栏/流体云天气。", 12.5f, theme.textSecondary, false);
         sub.setPadding(0, dp(4), 0, dp(12));
         box.addView(sub);
 
-        TextView locBtn = makeSheetButton("📍 授权定位 · 直接显示实时天气（推荐）", () -> {
+        TextView locBtn = makeSheetButton("授权定位 · 直接显示实时天气（推荐）", () -> {
             dismiss.run();
             requestPermissions(new String[]{Manifest.permission.ACCESS_COARSE_LOCATION}, REQ_WEATHER_LOC);
         });
@@ -1723,7 +1698,7 @@ public class MainActivity extends Activity {
         box.addView(locBtn, lp1);
 
         List<TextView> subBtns = new ArrayList<>();
-        subBtns.add(makeSheetButton("🔔 授权通知读取", () -> {
+        subBtns.add(makeSheetButton("授权通知读取", () -> {
             dismiss.run();
             startIntentSafely(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS));
         }));
@@ -1740,7 +1715,6 @@ public class MainActivity extends Activity {
         PendingIntent pi = NotificationHubService.weatherIntent;
         if (pi != null) {
             try {
-                launchedExternalApp = true;
                 pi.send();
                 return;
             } catch (Throwable ignored) {}
@@ -1809,7 +1783,7 @@ public class MainActivity extends Activity {
         final Dialog[] holder = new Dialog[1];
         final Runnable dismiss = () -> { if (holder[0] != null) holder[0].dismiss(); };
 
-        box.addView(makeText("📝 桌面速记便签", 18f, theme.textPrimary, true));
+        box.addView(makeText("桌面速记便签", 18f, theme.textPrimary, true));
         TextView sub = makeText("写下一句话备忘、取件码或今日待办（留空即可隐藏首页便签条）", 12.2f, theme.textSecondary, false);
         sub.setPadding(0, dp(3), 0, dp(10));
         box.addView(sub);
@@ -1823,12 +1797,12 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         List<TextView> btns = new ArrayList<>();
-        btns.add(makeSheetButton("🗑 清空隐藏", () -> {
+        btns.add(makeSheetButton("清空隐藏", () -> {
             prefs.edit().remove(K_STICKY_NOTE).apply();
             refreshStickyNotePill();
             dismiss.run();
         }));
-        TextView saveBtn = makeSheetButton("✓ 保存便签", () -> {
+        TextView saveBtn = makeSheetButton("保存便签", () -> {
             prefs.edit().putString(K_STICKY_NOTE, input.getText().toString().trim()).apply();
             refreshStickyNotePill();
             dismiss.run();
@@ -1903,32 +1877,27 @@ public class MainActivity extends Activity {
 
         LinearLayout hdrRow = new LinearLayout(this);
         hdrRow.setGravity(Gravity.CENTER_VERTICAL);
-        TextView titleTv = makeText("⚡ 流光桌面 · 本机实时状态", 18f, theme.textPrimary, true);
+        TextView titleTv = makeText("本机实时状态", 18f, theme.textPrimary, true);
         hdrRow.addView(titleTv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
-        TextView badgeTv = makeText("🛡️ 零联网", 11.2f, theme.accent, true);
-        badgeTv.setBackground(theme.accentGlowPill(dpUnit, 12));
-        badgeTv.setPadding(dp(9), dp(4), dp(9), dp(4));
-        hdrRow.addView(badgeTv);
         box.addView(hdrRow);
 
         String lunarInfoText = (dm.lunarLine == null || dm.lunarLine.isEmpty() || dm.lunarLine.equals(dm.greeting))
                 ? dm.greeting : (dm.greeting + " · " + dm.lunarLine);
-        TextView lunarTv = makeText("📅 " + lunarInfoText, 12.8f, theme.textSecondary, false);
+        TextView lunarTv = makeText(lunarInfoText, 12.8f, theme.textSecondary, false);
         lunarTv.setPadding(0, dp(4), 0, dp(10));
         box.addView(lunarTv);
 
-        // 2x2 可视化仪表盘磁贴（彻底告别原生黑框与文字断行）
+        // 2x2 可视化仪表盘磁贴
         LinearLayout row1 = new LinearLayout(this);
         row1.setOrientation(LinearLayout.HORIZONTAL);
         View batTile = buildStatusMetricTile(
-                "🔋 电池与温度",
+                "电池与温度",
                 dm.batteryPct + "% · " + (dm.charging ? "充电中" : "放电中"),
                 String.format(Locale.ROOT, "%.1f°C · %d mV", dm.batteryTempC, dm.batteryVoltMv),
                 dm.batteryPct,
                 dm.batteryPct >= 25 ? 0xFF10B981 : 0xFFF59E0B);
         View ramTile = buildStatusMetricTile(
-                "🧠 运行内存 (RAM)",
+                "运行内存 (RAM)",
                 "占用 " + dm.ramUsedPct + "%",
                 String.format(Locale.ROOT, "可用 %.1fG / 共 %.1fG", dm.ramAvailGb, dm.ramTotalGb),
                 dm.ramUsedPct,
@@ -1945,14 +1914,14 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         r2Lp.topMargin = dp(8);
         View romTile = buildStatusMetricTile(
-                "💾 本机存储空间",
+                "本机存储空间",
                 String.format(Locale.ROOT, "剩余 %.1f GB", dm.storageFreeGb),
                 String.format(Locale.ROOT, "已用 %d%% / 共 %.1fG", dm.storageUsedPct, dm.storageTotalGb),
                 dm.storageUsedPct,
                 0xFF8B5CF6);
         int favRatio = appCount > 0 ? Math.min(100, Math.max(12, favCount * 100 / Math.min(20, appCount))) : 35;
         View statTile = buildStatusMetricTile(
-                "📱 桌面应用统计",
+                "桌面应用统计",
                 "共 " + appCount + " 个应用",
                 "常用 " + favCount + " 个 · 累计启动 " + totalLaunches + " 次",
                 favRatio,
@@ -1963,48 +1932,18 @@ public class MainActivity extends Activity {
         row2.addView(statTile, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         box.addView(row2, r2Lp);
 
-        TextView privBanner = makeText("🛡️ 隐私承诺：仅在授权天气时请求气象数据，其余所有配置与统计 100% 留在本机。", 11.8f, theme.textSecondary, false);
-        privBanner.setBackground(theme.sheetTileCard(dpUnit, 14));
-        privBanner.setPadding(dp(12), dp(9), dp(12), dp(9));
-        LinearLayout.LayoutParams pbLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        pbLp.topMargin = dp(10);
-        box.addView(privBanner, pbLp);
-
         List<TextView> actions = new ArrayList<>();
-        actions.add(makeSheetButton("📝 添加/修改便签", () -> {
+        actions.add(makeSheetButton("桌面便签", () -> {
             dismiss.run();
             promptEditStickyNote();
         }));
-        actions.add(makeSheetButton("🎛 打开控制中心", () -> {
-            dismiss.run();
-            openControlCenterSheet();
-        }));
-        TextView okBtn = makeSheetButton("✓ 完成", dismiss);
+        TextView okBtn = makeSheetButton("完成", dismiss);
         okBtn.setBackground(theme.solidAccentButton(dpUnit, 14));
         okBtn.setTextColor(0xFFFFFFFF);
         actions.add(okBtn);
-        addGridButtons(box, actions, 3);
+        addGridButtons(box, actions, 2);
 
         holder[0] = showBottomSheetDialog(box);
-    }
-
-    void openColorOsRecents() {
-        List<AppEntry> recents = new ArrayList<>();
-        Set<String> seen = new HashSet<>();
-        for (String pkg : GestureLockService.getActivePackages()) {
-            AppEntry a = findAppByPackage(pkg);
-            if (a != null && seen.add(a.idKey)) recents.add(a);
-        }
-        for (String k : getStringList(K_RECENT_KEYS)) {
-            AppEntry a = findAppByKey(k);
-            if (a != null && seen.add(a.idKey)) recents.add(a);
-        }
-        for (AppEntry a : allApps) {
-            if (recents.size() >= 7) break;
-            if (seen.add(a.idKey)) recents.add(a);
-        }
-        ColorOsRecentsOverlay.show(this, recents, app -> launchApp(app), null);
     }
 
     // ---------- 统一 PopupCardController 宿主桥接 ----------
@@ -2041,11 +1980,8 @@ public class MainActivity extends Activity {
             @Override public void openAppDetails(AppEntry app) {
                 if (app == null || app.component == null) return;
                 try {
-                    launchedExternalApp = true;
                     launcherApps.startAppDetailsActivity(app.component, app.user, null, null);
-                } catch (Throwable t) {
-                    launchedExternalApp = false;
-                }
+                } catch (Throwable ignored) {}
             }
             @Override public void hideApp(AppEntry app) {
                 if (app == null) return;
@@ -2067,7 +2003,6 @@ public class MainActivity extends Activity {
             @Override public void openAddAppToFolder(AppEntry app) { promptAddAppToFolder(app); }
             @Override public void openControlCenter() { openControlCenterSheet(); }
             @Override public void hideSoftKeyboard() { MainActivity.this.hideSoftKeyboard(); }
-            @Override public void markLaunchedExternalApp(boolean launched) { launchedExternalApp = launched; }
             @Override public List<AppEntry> getAppPopupChildren(AppEntry parent) { return MainActivity.this.getAppPopupChildren(parent); }
             @Override public void openEditAppPopupChildren(AppEntry parent) { promptEditAppPopupChildren(parent); }
             @Override public void removeAppPopupChild(AppEntry parent, AppEntry child) { MainActivity.this.removeAppPopupChild(parent, child); }
@@ -2098,15 +2033,6 @@ public class MainActivity extends Activity {
     private int touchSlopPx = 0;
     private boolean touchDownOnAppRow = false;
     private boolean touchDownInHeader = false;
-    private Runnable pendingAppLaunchRunnable = null;
-    private long lastTapDownTime = 0;
-
-    private void cancelPendingAppLaunch() {
-        if (pendingAppLaunchRunnable != null) {
-            uiHandler.removeCallbacks(pendingAppLaunchRunnable);
-            pendingAppLaunchRunnable = null;
-        }
-    }
 
     private boolean hasClearableNotification(AppEntry app) {
         if (app == null || app.component == null) return false;
@@ -2123,11 +2049,6 @@ public class MainActivity extends Activity {
             rightRowSwiping = false;
             rightSwipeThresholdTicked = false;
             leftSwipeThresholdTicked = false;
-            long nowDown = SystemClock.uptimeMillis();
-            if (nowDown - lastTapDownTime < 340) {
-                cancelPendingAppLaunch();
-            }
-            lastTapDownTime = nowDown;
 
             rowSwiping = false;
             swipedRowPos = -1;
@@ -2321,12 +2242,10 @@ public class MainActivity extends Activity {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N_MR1 || launcherApps == null) {
                 throw new IllegalStateException("shortcuts unsupported");
             }
-            launchedExternalApp = true;
             UserHandle uh = sc.getUserHandle() != null ? sc.getUserHandle()
                     : (app.user != null ? app.user : Process.myUserHandle());
             launcherApps.startShortcut(sc.getPackage(), sc.getId(), null, null, uh);
         } catch (Throwable t) {
-            launchedExternalApp = false;
             Toast.makeText(this, "无法打开该快捷方式", Toast.LENGTH_SHORT).show();
         }
     }
@@ -2356,9 +2275,6 @@ public class MainActivity extends Activity {
             long now = SystemClock.uptimeMillis();
             if (now - lastDoubleTapLock < 2000) return true;
             lastDoubleTapLock = now;
-            cancelPendingAppLaunch();
-            wasOnHomeBeforeLock = true;
-            launchedExternalApp = false;
             uiHandler.postDelayed(MainActivity.this::triggerScreenLock, 50);
             return true;
         }
@@ -2389,10 +2305,8 @@ public class MainActivity extends Activity {
                     openInstantSearch();
                     return true;
                 }
-                if (prefs.getBoolean(K_SWIPE_DOWN_NOTIF, true)) {
-                    expandSystemNotificationPanel();
-                    return true;
-                }
+                expandSystemNotificationPanel();
+                return true;
             }
             // 首页一体流：列表已到底（或单屏未满）时向上轻扫无缝进入全部应用，内容溢出时优先顺滑滚动首页流
             if (dy < 0 && !inAllAppsMode && !searchActive && isListAtBottom()) {
@@ -2420,8 +2334,6 @@ public class MainActivity extends Activity {
     }
 
     private void triggerScreenLock() {
-        wasOnHomeBeforeLock = true;
-        launchedExternalApp = false;
         if (GestureLockService.lockScreenNow()) return;
         promptAccessibilitySetup("双击锁屏");
     }
@@ -2443,7 +2355,7 @@ public class MainActivity extends Activity {
         final Dialog[] holder = new Dialog[1];
         final Runnable dismiss = () -> { if (holder[0] != null) holder[0].dismiss(); };
 
-        box.addView(makeText("♿ " + featureName + " · 辅助手势授权", 17.5f, theme.textPrimary, true));
+        box.addView(makeText(featureName + " · 辅助手势授权", 17.5f, theme.textPrimary, true));
         TextView msg = makeText(
                 "请在「无障碍 → 已下载的应用」中开启「流光桌面 · 手势双击锁屏与通知栏」。\n\n"
                 + "• 该服务 100% 本地运行，仅执行锁屏与拉开通知栏动作，绝不读取屏幕内容。\n"
@@ -2453,13 +2365,13 @@ public class MainActivity extends Activity {
         box.addView(msg);
 
         List<TextView> btns = new ArrayList<>();
-        btns.add(makeSheetButton("🔓 解除受限设置", () -> {
+        btns.add(makeSheetButton("解除受限设置", () -> {
             dismiss.run();
             startIntentSafely(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                     Uri.parse("package:" + getPackageName())));
             Toast.makeText(this, "请点右上角 ⋮ → 允许受限制的设置", Toast.LENGTH_LONG).show();
         }));
-        TextView goBtn = makeSheetButton("✓ 去开启无障碍", () -> {
+        TextView goBtn = makeSheetButton("去开启无障碍", () -> {
             dismiss.run();
             String cn = new ComponentName(this, GestureLockService.class).flattenToString();
             Intent i = new Intent("android.settings.ACCESSIBILITY_DETAILS_SETTINGS")
@@ -2659,17 +2571,14 @@ public class MainActivity extends Activity {
     }
 
     private void sortAppList(List<AppEntry> list) {
-        final boolean byUsage = prefs.getBoolean(K_SORT_BY_USAGE, true);
-        final JSONObject usage = byUsage ? getLaunchCountsJson() : new JSONObject();
+        final JSONObject usage = getLaunchCountsJson();
         Collections.sort(list, (x, y) -> {
             int gx = WAVE_SYMBOLS.indexOf(x.groupChar);
             int gy = WAVE_SYMBOLS.indexOf(y.groupChar);
             if (gx != gy) return gx - gy;
-            if (byUsage) {
-                int ux = usage.optInt(x.idKey, 0);
-                int uy = usage.optInt(y.idKey, 0);
-                if (ux != uy) return uy - ux;
-            }
+            int ux = usage.optInt(x.idKey, 0);
+            int uy = usage.optInt(y.idKey, 0);
+            if (ux != uy) return uy - ux;
             int c = x.fullPy.compareTo(y.fullPy);
             return c != 0 ? c : x.label.compareTo(y.label);
         });
@@ -3147,7 +3056,7 @@ public class MainActivity extends Activity {
             }
         }
         if (virtualSettingsApp != null) {
-            streamRows.add(new StreamRow(StreamRow.TYPE_SECTION, "⚙", null));
+            streamRows.add(new StreamRow(StreamRow.TYPE_SECTION, "设置", null));
             streamRows.add(new StreamRow(StreamRow.TYPE_ALL_APP, null, virtualSettingsApp));
         }
 
@@ -3270,7 +3179,7 @@ public class MainActivity extends Activity {
                     pill.setBackground(theme.accentGlowPill(dpUnit, 18));
                     pill.setPadding(dp(14), dp(11), dp(14), dp(11));
 
-                    SearchGlyphView ic = new SearchGlyphView(MainActivity.this, SearchGlyphView.IC_CALC, theme.accent, dpUnit);
+                    VectorGlyphView ic = new VectorGlyphView(MainActivity.this, VectorGlyphView.IC_CALC, theme.accent, dpUnit);
                     LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(dp(18), dp(18));
                     ilp.rightMargin = dp(10);
                     pill.addView(ic, ilp);
@@ -3299,7 +3208,7 @@ public class MainActivity extends Activity {
                     pill.setBackground(theme.subtleGhostPill(dpUnit, 16));
                     pill.setPadding(dp(14), dp(11), dp(14), dp(11));
 
-                    SearchGlyphView ic = new SearchGlyphView(MainActivity.this, SearchGlyphView.IC_GLOBE, theme.accent, dpUnit);
+                    VectorGlyphView ic = new VectorGlyphView(MainActivity.this, VectorGlyphView.IC_GLOBE, theme.accent, dpUnit);
                     LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(dp(17), dp(17));
                     ilp.rightMargin = dp(10);
                     pill.addView(ic, ilp);
@@ -3460,7 +3369,15 @@ public class MainActivity extends Activity {
                 t1.setTypeface(typeface);
                 t1.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp(15.5f));
                 t1.setShadowLayer(theme.isLight ? dp(1.0f) : dp(2.2f), 0f, dp(0.6f), theme.isLight ? 0x20FFFFFF : 0x48000000);
-                t2.setText(cnt + " 个应用" + (tapLaunchFirst ? " · 点开首项" : ""));
+                if (cnt == 0) {
+                    t2.setText("空文件夹 · 长按选应用");
+                    t2.setVisibility(View.VISIBLE);
+                } else if (tapLaunchFirst) {
+                    t2.setText("轻点直开 · " + cnt + " 项");
+                    t2.setVisibility(View.VISIBLE);
+                } else {
+                    t2.setVisibility(View.GONE);
+                }
                 t2.setTextColor(theme.textSecondary);
                 t2.setTypeface(typeface);
                 t2.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp(11.4f));
@@ -3703,69 +3620,6 @@ public class MainActivity extends Activity {
             path.lineTo(cx + dx, cy);
             path.lineTo(cx - dx, cy + dy);
             c.drawPath(path, paint);
-        }
-    }
-
-    /** 搜索栏与搜索结果行极简线性矢量图标（零 Emoji）。 */
-    private static final class SearchGlyphView extends View {
-        static final int IC_SEARCH = 0;
-        static final int IC_CLIPBOARD = 1;
-        static final int IC_CLOSE = 2;
-        static final int IC_CALC = 3;
-        static final int IC_GLOBE = 4;
-
-        private final int type;
-        private final float dp;
-        private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final RectF r = new RectF();
-
-        SearchGlyphView(Context ctx, int type, int color, float dp) {
-            super(ctx);
-            this.type = type;
-            this.dp = dp;
-            p.setColor(color);
-            p.setStyle(Paint.Style.STROKE);
-            p.setStrokeWidth(1.5f * dp);
-            p.setStrokeCap(Paint.Cap.ROUND);
-            p.setStrokeJoin(Paint.Join.ROUND);
-        }
-
-        @Override
-        protected void onDraw(Canvas c) {
-            float w = getWidth(), h = getHeight();
-            float cx = w * 0.5f, cy = h * 0.5f;
-            float u = Math.min(w, h) * 0.36f;
-
-            switch (type) {
-                case IC_SEARCH:
-                    c.drawCircle(cx - u * 0.18f, cy - u * 0.18f, u * 0.68f, p);
-                    c.drawLine(cx + u * 0.30f, cy + u * 0.30f, cx + u * 0.92f, cy + u * 0.92f, p);
-                    break;
-                case IC_CLIPBOARD:
-                    r.set(cx - u * 0.78f, cy - u * 0.68f, cx + u * 0.78f, cy + u * 0.92f);
-                    c.drawRoundRect(r, 2f * dp, 2f * dp, p);
-                    r.set(cx - u * 0.38f, cy - u * 0.95f, cx + u * 0.38f, cy - u * 0.50f);
-                    c.drawRoundRect(r, 1.2f * dp, 1.2f * dp, p);
-                    break;
-                case IC_CALC:
-                    r.set(cx - u * 0.85f, cy - u * 0.95f, cx + u * 0.85f, cy + u * 0.95f);
-                    c.drawRoundRect(r, 2.2f * dp, 2.2f * dp, p);
-                    c.drawLine(cx - u * 0.45f, cy - u * 0.45f, cx + u * 0.45f, cy - u * 0.45f, p);
-                    c.drawLine(cx - u * 0.45f, cy + u * 0.12f, cx + u * 0.45f, cy + u * 0.12f, p);
-                    c.drawLine(cx - u * 0.45f, cy + u * 0.52f, cx + u * 0.45f, cy + u * 0.52f, p);
-                    break;
-                case IC_GLOBE:
-                    c.drawCircle(cx, cy, u * 0.92f, p);
-                    r.set(cx - u * 0.44f, cy - u * 0.92f, cx + u * 0.44f, cy + u * 0.92f);
-                    c.drawOval(r, p);
-                    c.drawLine(cx - u * 0.90f, cy, cx + u * 0.90f, cy, p);
-                    break;
-                case IC_CLOSE:
-                default:
-                    c.drawLine(cx - u * 0.68f, cy - u * 0.68f, cx + u * 0.68f, cy + u * 0.68f, p);
-                    c.drawLine(cx + u * 0.68f, cy - u * 0.68f, cx - u * 0.68f, cy + u * 0.68f, p);
-                    break;
-            }
         }
     }
 
@@ -4222,9 +4076,8 @@ public class MainActivity extends Activity {
             return;
         }
 
-        // 🚀 专门适配 ColorOS 小布助手 AI：拦截并使用 ColorOS 专属助手通道唤醒
+        // 专门适配 ColorOS 小布助手 AI：拦截并使用 ColorOS 专属助手通道唤醒
         if (isXiaoBuApp(app)) {
-            launchedExternalApp = true;
             if (launchColorOsXiaoBu()) {
                 final AppEntry launchedApp = app;
                 AppExecutors.getInstance().diskIO().execute(() -> recordAppLaunch(launchedApp));
@@ -4237,9 +4090,7 @@ public class MainActivity extends Activity {
         }
 
         try {
-            launchedExternalApp = true;
-
-            // 🚀 1. 传入源图标锚点与平滑展开动画，让进出应用的系统过渡更跟手
+            // 1. 传入源图标锚点与平滑展开动画，让进出应用的系统过渡更跟手
             Rect sourceBounds = null;
             Bundle opts = null;
             if (sourceView != null && sourceView.getWidth() > 0 && sourceView.getHeight() > 0) {
@@ -4255,8 +4106,7 @@ public class MainActivity extends Activity {
 
             if (app.isShortcut) {
                 boolean launched = false;
-                // 🚀 1. 系统快捷方式：优先使用 LauncherApps 原生启动！
-                // 这让浏览器自身注册的 PWA / WebApp 意图（WebappLauncherActivity）直接以独立卡片与独立窗口唤醒，绝不掉进浏览器标签页！
+                // 1. 系统快捷方式：优先使用 LauncherApps 原生启动
                 if (app.shortcutInfo != null) {
                     try {
                         launcherApps.startShortcut(app.shortcutInfo, null, opts);
@@ -4270,7 +4120,7 @@ public class MainActivity extends Activity {
                         }
                     }
                 }
-                // 🚀 2. 若原生快捷方式启动失败，或者属于自定义反重力/独立 Web 快捷方式，使用 PWA 独立窗口规范启动
+                // 2. 若原生快捷方式启动失败，或者属于自定义反重力/独立 Web 快捷方式，使用 PWA 独立窗口规范启动
                 if (!launched) {
                     if (launchWebShortcutAsStandalone(app, opts)) {
                         launched = true;
@@ -4283,7 +4133,7 @@ public class MainActivity extends Activity {
                 launcherApps.startMainActivity(app.component, app.user, sourceBounds, opts);
             }
 
-            // 🚀 2. 启动记录放入后台线程计算，主线程 0 负载，彻底解决应用推出/进入卡顿！
+            // 2. 启动记录放入后台线程计算，主线程 0 负载
             final AppEntry launchedApp = app;
             AppExecutors.getInstance().diskIO().execute(() -> recordAppLaunch(launchedApp));
 
@@ -4292,14 +4142,13 @@ public class MainActivity extends Activity {
                 if (searchActive) closeInstantSearch();
             }, 380);
         } catch (Throwable t) {
-            // 🚀 启动异常容错：若常规启动被系统拒绝且属于小布助手，转由专属通道唤醒
+            // 启动异常容错：若常规启动被系统拒绝且属于小布助手，转由专属通道唤醒
             if (isXiaoBuApp(app) && launchColorOsXiaoBu()) {
                 final AppEntry launchedApp = app;
                 AppExecutors.getInstance().diskIO().execute(() -> recordAppLaunch(launchedApp));
                 hideSoftKeyboard();
                 return;
             }
-            launchedExternalApp = false;
             Toast.makeText(this, "无法启动 " + app.label, Toast.LENGTH_SHORT).show();
         }
     }
@@ -4350,9 +4199,14 @@ public class MainActivity extends Activity {
         dlg.setContentView(scroll);
         Window w = dlg.getWindow();
         if (w != null) {
+            int sw = getResources().getDisplayMetrics().widthPixels;
+            int maxH = Math.round(getResources().getDisplayMetrics().heightPixels * 0.82f);
+            scroll.measure(View.MeasureSpec.makeMeasureSpec(sw, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+            int winH = scroll.getMeasuredHeight() > maxH ? maxH : ViewGroup.LayoutParams.WRAP_CONTENT;
             w.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
             w.setGravity(Gravity.BOTTOM);
-            w.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            w.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, winH);
             w.setDimAmount(0.42f);
             w.setWindowAnimations(android.R.style.Animation_InputMethod);
             w.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
@@ -4410,18 +4264,36 @@ public class MainActivity extends Activity {
         Toast.makeText(this, "已切换为「" + AuroraTheme.SHORT_PALETTE_NAMES[styleIdx] + "」并同步昼夜壁纸", Toast.LENGTH_SHORT).show();
         AppExecutors.getInstance().computation().execute(() -> {
             try {
-                int phase = AuroraTheme.resolveSolarPhase(this);
-                boolean sysNight = (phase == WeatherSyncEngine.SOLAR_NIGHT);
                 Bitmap bmp = AuroraBackdropView.renderAuroraWallpaper(this, styleIdx);
                 AuroraBackdropView.saveAndApplySystemWallpaper(this, bmp);
-                prefs.edit()
-                        .putInt(K_WALL_STYLE_IDX, styleIdx)
-                        .putInt("wall_applied_phase_v2", phase)
-                        .putBoolean(K_WALL_APPLIED_NIGHT, sysNight)
-                        .apply();
+                prefs.edit().putInt(K_WALL_STYLE_IDX, styleIdx).apply();
             } catch (Throwable ignored) {}
         });
         recreate();
+    }
+
+    private int resolveStatusBarMode() {
+        if (prefs.contains(K_STATUS_BAR_MODE)) {
+            return Math.max(HeroStatusBarView.MODE_SMART,
+                    Math.min(HeroStatusBarView.MODE_FULL, prefs.getInt(K_STATUS_BAR_MODE, HeroStatusBarView.MODE_SMART)));
+        }
+        int migrated = HeroStatusBarView.MODE_SMART;
+        if (prefs.getBoolean("status_bar_full_v1", false)) {
+            migrated = HeroStatusBarView.MODE_FULL;
+        } else if (!prefs.getBoolean("smart_battery_only_v1", true)) {
+            migrated = HeroStatusBarView.MODE_ALWAYS_BATTERY;
+        }
+        prefs.edit().putInt(K_STATUS_BAR_MODE, migrated).apply();
+        return migrated;
+    }
+
+    private void showStatusBarModePickerDialog() {
+        int cur = resolveStatusBarMode();
+        showSingleChoiceDialog("顶部状态栏信息", HeroStatusBarView.STATUS_MODE_NAMES, cur, idx -> {
+            prefs.edit().putInt(K_STATUS_BAR_MODE, idx).apply();
+            if (niagaraHeaderView != null) niagaraHeaderView.setStatusBarMode(idx);
+            Toast.makeText(MainActivity.this, "已设为：" + HeroStatusBarView.STATUS_MODE_NAMES[idx], Toast.LENGTH_SHORT).show();
+        });
     }
 
     private void openControlCenterSheet() {
@@ -4478,8 +4350,8 @@ public class MainActivity extends Activity {
             @Override public void applyThemePreset(int styleIdx) { applyWallpaperAndThemePreset(styleIdx); }
             @Override public void pickGalleryWallpaper() {
                 Intent pick = new Intent(Intent.ACTION_GET_CONTENT).setType("image/*").addCategory(Intent.CATEGORY_OPENABLE);
-                try { launchedExternalApp = true; startActivityForResult(pick, REQ_PICK_WALL); }
-                catch (Throwable t) { launchedExternalApp = false; }
+                try { startActivityForResult(pick, REQ_PICK_WALL); }
+                catch (Throwable t) { Toast.makeText(MainActivity.this, "无法打开相册", Toast.LENGTH_SHORT).show(); }
             }
             @Override public void onDimPercentChanged(int pct) {
                 prefs.edit().putInt(K_DIM_PCT, pct).apply();
@@ -4550,17 +4422,11 @@ public class MainActivity extends Activity {
             @Override public void showClockStylePicker() {
                 showClockStylePickerDialog();
             }
-            @Override public void onSmartBatteryChanged(boolean smartOnly) {
-                prefs.edit().putBoolean(K_SMART_BATTERY, smartOnly).apply();
-                if (niagaraHeaderView != null) niagaraHeaderView.setSmartBatteryOnly(smartOnly);
+            @Override public String getCurrentStatusBarModeName() {
+                return HeroStatusBarView.STATUS_MODE_NAMES[resolveStatusBarMode()].split("（")[0];
             }
-            @Override public void onStatusBarFullChanged(boolean full) {
-                prefs.edit().putBoolean(K_STATUS_BAR_FULL, full).apply();
-                if (niagaraHeaderView != null) niagaraHeaderView.setStatusBarFullMode(full);
-            }
-            @Override public void onHeroHighContrastChanged(boolean highContrast) {
-                prefs.edit().putBoolean(K_HERO_HIGH_CONTRAST, highContrast).apply();
-                if (niagaraHeaderView != null) niagaraHeaderView.setHeroHighContrast(highContrast);
+            @Override public void showStatusBarModePicker() {
+                showStatusBarModePickerDialog();
             }
             @Override public void onFavCardsChanged(boolean on) {
                 prefs.edit().putBoolean(K_FAV_CARDS, on).apply();
@@ -4627,15 +4493,15 @@ public class MainActivity extends Activity {
                         .addCategory(Intent.CATEGORY_OPENABLE)
                         .setType("application/json")
                         .putExtra(Intent.EXTRA_TITLE, "niagara-local-backup.json");
-                try { launchedExternalApp = true; startActivityForResult(i, REQ_EXPORT_JSON); }
-                catch (Throwable t) { launchedExternalApp = false; }
+                try { startActivityForResult(i, REQ_EXPORT_JSON); }
+                catch (Throwable t) { Toast.makeText(MainActivity.this, "无法打开文件保存界面", Toast.LENGTH_SHORT).show(); }
             }
             @Override public void importBackup() {
                 Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT)
                         .addCategory(Intent.CATEGORY_OPENABLE)
                         .setType("*/*");
-                try { launchedExternalApp = true; startActivityForResult(i, REQ_IMPORT_JSON); }
-                catch (Throwable t) { launchedExternalApp = false; }
+                try { startActivityForResult(i, REQ_IMPORT_JSON); }
+                catch (Throwable t) { Toast.makeText(MainActivity.this, "无法打开文件选择界面", Toast.LENGTH_SHORT).show(); }
             }
             @Override public void openHomeSettings() {
                 startIntentSafely(new Intent(Settings.ACTION_HOME_SETTINGS));
@@ -4683,7 +4549,7 @@ public class MainActivity extends Activity {
         if (packs.isEmpty()) {
             Toast.makeText(this, "未检测到已安装的第三方图标包 APK（支持 Nova / ADW 规范图标包）", Toast.LENGTH_LONG).show();
         }
-        showSingleChoiceDialog("🎨 选择第三方图标包", labels, sel, idx -> {
+        showSingleChoiceDialog("选择第三方图标包", labels, sel, idx -> {
             String chosen = pkgs[idx];
             prefs.edit().putString(K_ICON_PACK, chosen).apply();
             IconPackManager.loadPack(MainActivity.this, chosen);
@@ -4712,11 +4578,11 @@ public class MainActivity extends Activity {
         final Dialog[] holder = new Dialog[1];
         final Runnable dismiss = () -> { if (holder[0] != null) holder[0].dismiss(); };
 
-        box.addView(makeText("🎨 为「" + app.label + "」自定义图标", 17.5f, theme.textPrimary, true));
+        box.addView(makeText("为「" + app.label + "」自定义图标", 17.5f, theme.textPrimary, true));
         box.addView(makeText("来自图标包：" + packPkg, 12f, theme.textSecondary, false));
 
         List<TextView> btns = new ArrayList<>();
-        btns.add(makeSheetButton("↺ 恢复默认图标", () -> {
+        btns.add(makeSheetButton("恢复默认图标", () -> {
             try {
                 JSONObject ci = getCustomIconsJson();
                 ci.remove(app.idKey);
@@ -4752,7 +4618,7 @@ public class MainActivity extends Activity {
         final Dialog[] holder = new Dialog[1];
         final Runnable dismiss = () -> { if (holder[0] != null) holder[0].dismiss(); };
 
-        box.addView(makeText("🧩 首页原生桌面微件 (Widgets)", 18f, theme.textPrimary, true));
+        box.addView(makeText("首页原生桌面微件 (Widgets)", 18f, theme.textPrimary, true));
         TextView tip = makeText("可添加系统时钟、天气、便签、待办等原生小组件到首页顶部，长按微件可调高度或移除。", 12.2f, theme.textSecondary, false);
         tip.setPadding(0, dp(3), 0, dp(10));
         box.addView(tip);
@@ -4762,7 +4628,7 @@ public class MainActivity extends Activity {
             addSheetSectionHeader(box, "已添加到首页 (" + pinned.size() + ")");
             List<TextView> remBtns = new ArrayList<>();
             for (final WidgetHostHelper.PinnedWidget pw : pinned) {
-                remBtns.add(makeSheetButton("🗑 移除微件 #" + pw.id + " (" + pw.heightDp + "dp)", () -> {
+                remBtns.add(makeSheetButton("移除微件 #" + pw.id + " (" + pw.heightDp + "dp)", () -> {
                     widgetHelper.removeWidget(prefs, pw.id);
                     refreshHomeWidgets();
                     dismiss.run();
@@ -4772,7 +4638,7 @@ public class MainActivity extends Activity {
             addGridButtons(box, remBtns, 1);
         }
 
-        addSheetSectionHeader(box, "＋ 选择要添加的系统微件");
+        addSheetSectionHeader(box, "选择要添加的系统微件");
         final List<AppWidgetProviderInfo> providers = widgetHelper.getAllProviders();
         final PackageManager pm = getPackageManager();
         List<TextView> pBtns = new ArrayList<>();
@@ -4781,7 +4647,7 @@ public class MainActivity extends Activity {
             if (info == null || info.provider == null) continue;
             CharSequence lb = info.loadLabel(pm);
             String title = (lb != null && lb.length() > 0) ? lb.toString().trim() : info.provider.getShortClassName();
-            pBtns.add(makeSheetButton("🧩 " + title, () -> {
+            pBtns.add(makeSheetButton(title, () -> {
                 dismiss.run();
                 widgetHelper.requestAddWidget(MainActivity.this, prefs, info, () -> {
                     refreshHomeWidgets();
@@ -4852,371 +4718,52 @@ public class MainActivity extends Activity {
         holder[0] = showBottomSheetDialog(box);
     }
 
+    private AppPickerSheet.Host appPickerHost() {
+        return new AppPickerSheet.Host() {
+            @Override public Context getContext() { return MainActivity.this; }
+            @Override public AuroraTheme getThemeObj() { return theme; }
+            @Override public Typeface getTypeface() { return typeface; }
+            @Override public float getDp() { return dpUnit; }
+            @Override public float sp(float size) { return MainActivity.this.sp(size); }
+        };
+    }
+
     private void showPickFavoritesDialog() {
         final Set<String> hidden = new HashSet<>(getStringList(K_HIDDEN));
         final List<AppEntry> candidates = new ArrayList<>();
         for (AppEntry a : allApps) if (!hidden.contains(a.idKey)) candidates.add(a);
         final List<String> curFavs = getStringList(K_FAVS);
-        final Set<String> selectedKeys = new LinkedHashSet<>(curFavs);
 
-        final LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        final Dialog[] holder = new Dialog[1];
-        final Runnable dismiss = () -> { if (holder[0] != null) holder[0].dismiss(); };
-
-        // 1. 顶部标题栏 + 已选常用计数徽章
-        LinearLayout topHeader = new LinearLayout(this);
-        topHeader.setOrientation(LinearLayout.HORIZONTAL);
-        topHeader.setGravity(Gravity.CENTER_VERTICAL);
-        TextView titleTv = makeText("⭐ 勾选第一页常用应用", 18f, theme.textPrimary, true);
-        topHeader.addView(titleTv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
-        final TextView countBadge = makeText("已选 " + selectedKeys.size() + " 个", 12f, theme.accent, true);
-        countBadge.setBackground(theme.accentGlowPill(dpUnit, 10));
-        countBadge.setPadding(dp(10), dp(4), dp(10), dp(4));
-        topHeader.addView(countBadge);
-        box.addView(topHeader);
-
-        TextView tip = makeText("可点击下方字母栏快速跳转/筛选，或直接输入字母查找", 11.8f, theme.textSecondary, false);
-        tip.setPadding(0, dp(2), 0, dp(8));
-        box.addView(tip);
-
-        // 2. 字母与关键字快速搜索栏
-        final EditText searchBox = new EditText(this);
-        searchBox.setHint("🔍 按字母(如 wx)或应用名即时查找...");
-        searchBox.setHintTextColor((theme.textSecondary & 0x00FFFFFF) | 0x88000000);
-        searchBox.setTextColor(theme.textPrimary);
-        searchBox.setTextSize(13.2f);
-        searchBox.setTypeface(typeface);
-        searchBox.setSingleLine(true);
-        searchBox.setImeOptions(EditorInfo.IME_ACTION_DONE);
-        GradientDrawable sbg = new GradientDrawable();
-        sbg.setColor(theme.isLight ? 0x14000000 : 0x24FFFFFF);
-        sbg.setCornerRadius(dp(12));
-        searchBox.setBackground(sbg);
-        searchBox.setPadding(dp(12), dp(7), dp(12), dp(7));
-        box.addView(searchBox);
-
-        // 3. 收集所有候选应用实际存在的首字母并构建字母栏
-        final List<String> letters = new ArrayList<>();
-        letters.add("全部");
-        letters.add("★已选");
-        for (char c = 'A'; c <= 'Z'; c++) {
-            for (AppEntry a : candidates) {
-                if (a.groupChar == c) {
-                    letters.add(String.valueOf(c));
-                    break;
-                }
-            }
-        }
-        for (AppEntry a : candidates) {
-            if (a.groupChar == '#') {
-                letters.add("#");
-                break;
-            }
-        }
-
-        // 4. 横向滑动字母快捷筛选条
-        HorizontalScrollView letterScroll = new HorizontalScrollView(this);
-        letterScroll.setHorizontalScrollBarEnabled(false);
-        letterScroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
-        final LinearLayout letterRow = new LinearLayout(this);
-        letterRow.setOrientation(LinearLayout.HORIZONTAL);
-        letterRow.setGravity(Gravity.CENTER_VERTICAL);
-        letterRow.setPadding(0, dp(8), 0, dp(8));
-
-        final String[] curFilterLetter = new String[] { "全部" };
-        final List<TextView> letterPills = new ArrayList<>();
-
-        final LinearLayout gridContainer = new LinearLayout(this);
-        gridContainer.setOrientation(LinearLayout.VERTICAL);
-
-        final TextView saveBtn = makeSheetButton("✓ 保存常用 (" + selectedKeys.size() + ")", null);
-
-        final Runnable refreshGrid = new Runnable() {
-            @Override
-            public void run() {
-                gridContainer.removeAllViews();
-                String filter = curFilterLetter[0];
-                String query = searchBox.getText().toString().trim().toLowerCase(Locale.ROOT);
-
-                List<AppEntry> matched = new ArrayList<>();
-                for (AppEntry a : candidates) {
-                    if ("★已选".equals(filter)) {
-                        if (!selectedKeys.contains(a.idKey)) continue;
-                    } else if (!"全部".equals(filter)) {
-                        if (filter.length() == 1 && a.groupChar != filter.charAt(0)) continue;
-                    }
-
-                    if (!query.isEmpty()) {
-                        boolean hit = false;
-                        if (a.label != null && a.label.toLowerCase(Locale.ROOT).contains(query)) hit = true;
-                        else if (a.iniPy != null && a.iniPy.toLowerCase(Locale.ROOT).contains(query)) hit = true;
-                        else if (a.fullPy != null && a.fullPy.toLowerCase(Locale.ROOT).contains(query)) hit = true;
-                        else if (query.length() == 1 && Character.toUpperCase(query.charAt(0)) == a.groupChar) hit = true;
-                        if (!hit) continue;
-                    }
-                    matched.add(a);
-                }
-
-                if (matched.isEmpty()) {
-                    TextView emptyTv = makeText("无匹配应用，请尝试其他字母或清空搜索", 12.5f, theme.textSecondary, false);
-                    emptyTv.setGravity(Gravity.CENTER);
-                    emptyTv.setPadding(0, dp(24), 0, dp(24));
-                    gridContainer.addView(emptyTv);
-                    return;
-                }
-
-                List<TextView> itemBtns = new ArrayList<>();
-                for (AppEntry app : matched) {
-                    final AppEntry curApp = app;
-                    final boolean isChecked = selectedKeys.contains(curApp.idKey);
-                    final TextView btn = makeText(
-                            (isChecked ? "★ " : "☆ ") + curApp.label,
-                            13.2f,
-                            isChecked ? theme.accent : theme.textPrimary,
-                            isChecked);
-                    btn.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
-                    btn.setSingleLine(true);
-                    btn.setEllipsize(TextUtils.TruncateAt.END);
-                    btn.setBackground(isChecked ? theme.accentGlowPill(dpUnit, 14) : theme.sheetTileCard(dpUnit, 14));
-                    btn.setPadding(dp(12), dp(10), dp(12), dp(10));
-                    btn.setOnClickListener(v -> {
-                        if (selectedKeys.contains(curApp.idKey)) {
-                            selectedKeys.remove(curApp.idKey);
-                        } else {
-                            selectedKeys.add(curApp.idKey);
-                        }
-                        boolean nowChecked = selectedKeys.contains(curApp.idKey);
-                        btn.setText((nowChecked ? "★ " : "☆ ") + curApp.label);
-                        btn.setTextColor(nowChecked ? theme.accent : theme.textPrimary);
-                        btn.setTypeface(nowChecked ? Typeface.create(typeface, Typeface.BOLD) : typeface);
-                        btn.setBackground(nowChecked ? theme.accentGlowPill(dpUnit, 14) : theme.sheetTileCard(dpUnit, 14));
-                        countBadge.setText("已选 " + selectedKeys.size() + " 个");
-                        saveBtn.setText("✓ 保存常用 (" + selectedKeys.size() + ")");
-                        if ("★已选".equals(curFilterLetter[0])) {
-                            run();
-                        }
-                    });
-                    itemBtns.add(btn);
-                }
-                addGridButtons(gridContainer, itemBtns, 2);
-            }
-        };
-
-        // 渲染字母筛选胶囊
-        for (int i = 0; i < letters.size(); i++) {
-            final String l = letters.get(i);
-            final TextView pill = makeText(l, 12.0f, theme.textSecondary, false);
-            pill.setGravity(Gravity.CENTER);
-            pill.setPadding(dp(11), dp(5), dp(11), dp(5));
-            pill.setBackground(theme.subtleGhostPill(dpUnit, 10));
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            lp.rightMargin = dp(6);
-            pill.setLayoutParams(lp);
-
-            pill.setOnClickListener(v -> {
-                curFilterLetter[0] = l;
-                for (TextView p : letterPills) {
-                    boolean active = l.equals(p.getText().toString());
-                    p.setTextColor(active ? theme.accent : theme.textSecondary);
-                    p.setTypeface(active ? Typeface.create(typeface, Typeface.BOLD) : typeface);
-                    p.setBackground(active ? theme.accentGlowPill(dpUnit, 10) : theme.subtleGhostPill(dpUnit, 10));
-                }
-                refreshGrid.run();
-            });
-
-            if (i == 0) {
-                pill.setTextColor(theme.accent);
-                pill.setTypeface(Typeface.create(typeface, Typeface.BOLD));
-                pill.setBackground(theme.accentGlowPill(dpUnit, 10));
-            }
-            letterPills.add(pill);
-            letterRow.addView(pill);
-        }
-        letterScroll.addView(letterRow);
-        box.addView(letterScroll);
-
-        searchBox.addTextChangedListener(new TextWatcher() {
-            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
-            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
-                refreshGrid.run();
-            }
-            @Override public void afterTextChanged(Editable s) {}
-        });
-
-        // 初始填充应用网格
-        box.addView(gridContainer);
-        refreshGrid.run();
-
-        // 5. 底部保存与调整排序按钮
-        List<TextView> actions = new ArrayList<>();
-        actions.add(makeSheetButton("↕ 调整顺序", () -> {
-            dismiss.run();
-            showReorderFavoritesDialog();
-        }));
-
-        saveBtn.setOnClickListener(v -> {
-            List<String> updated = new ArrayList<>();
-            for (String k : curFavs) if (selectedKeys.contains(k)) updated.add(k);
-            for (AppEntry a : candidates) {
-                if (selectedKeys.contains(a.idKey) && !updated.contains(a.idKey)) {
-                    updated.add(a.idKey);
-                }
-            }
-            putStringList(K_FAVS, updated);
-            inAllAppsMode = false;
-            updateFirstPageExtrasVisibility();
-            rebuildStreamRows();
-            dismiss.run();
-            Toast.makeText(MainActivity.this, "已更新常用应用（共 " + updated.size() + " 个）", Toast.LENGTH_SHORT).show();
-        });
-        saveBtn.setBackground(theme.solidAccentButton(dpUnit, 14));
-        saveBtn.setTextColor(0xFFFFFFFF);
-        actions.add(saveBtn);
-        addGridButtons(box, actions, 2);
-
-        holder[0] = showBottomSheetDialog(box);
+        currentSheetDialog = AppPickerSheet.showMultiSelect(
+                appPickerHost(),
+                "勾选第一页常用应用",
+                "点击下方字母栏快速筛选，或直接输入拼音查找",
+                candidates,
+                curFavs,
+                "调整顺序",
+                this::showReorderFavoritesDialog,
+                "保存常用",
+                updated -> {
+                    putStringList(K_FAVS, updated);
+                    inAllAppsMode = false;
+                    updateFirstPageExtrasVisibility();
+                    rebuildStreamRows();
+                    Toast.makeText(MainActivity.this, "已更新常用应用（共 " + updated.size() + " 个）", Toast.LENGTH_SHORT).show();
+                });
     }
 
     private void showReorderFavoritesDialog() {
         final List<String> favs = getStringList(K_FAVS);
-        final Map<String, AppEntry> byKey = new HashMap<>();
-        for (AppEntry a : allApps) byKey.put(a.idKey, a);
-        for (Iterator<String> it = favs.iterator(); it.hasNext(); ) {
-            if (!byKey.containsKey(it.next())) it.remove();
-        }
-        if (favs.size() < 2) {
-            Toast.makeText(this, "请先勾选至少 2 个常用应用", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        final LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        final Dialog[] holder = new Dialog[1];
-        final Runnable dismiss = () -> { if (holder[0] != null) holder[0].dismiss(); };
-
-        box.addView(makeText("↕ 拖拽或点击调整常用顺序", 18f, theme.textPrimary, true));
-        TextView dragTip = makeText("按住左侧 ≡ 手柄上下拖拽即可实时排序，也可轻点右侧箭头", 12f, theme.textSecondary, false);
-        dragTip.setPadding(0, dp(2), 0, dp(6));
-        box.addView(dragTip);
-
-        final LinearLayout listCol = new LinearLayout(this);
-        listCol.setOrientation(LinearLayout.VERTICAL);
-        listCol.setPadding(0, dp(4), 0, dp(8));
-
-        final Runnable[] refreshUi = new Runnable[1];
-        refreshUi[0] = () -> {
-            listCol.removeAllViews();
-            for (int i = 0; i < favs.size(); i++) {
-                final int idx = i;
-                final LinearLayout r = new LinearLayout(this);
-                r.setGravity(Gravity.CENTER_VERTICAL);
-                r.setBackground(theme.sheetTileCard(dpUnit, 14));
-                r.setPadding(dp(10), dp(6), dp(8), dp(6));
-
-                TextView dragHandle = makeText("≡", 18f, theme.accent, true);
-                dragHandle.setGravity(Gravity.CENTER);
-                dragHandle.setOnTouchListener(new View.OnTouchListener() {
-                    private float startRawY;
-                    private int curIdx = idx;
-
-                    @Override
-                    public boolean onTouch(View v, MotionEvent event) {
-                        int act = event.getActionMasked();
-                        if (act == MotionEvent.ACTION_DOWN) {
-                            startRawY = event.getRawY();
-                            curIdx = idx;
-                            v.getParent().getParent().requestDisallowInterceptTouchEvent(true);
-                            r.setAlpha(0.85f);
-                            r.setScaleX(1.02f);
-                            r.setScaleY(1.02f);
-                            r.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
-                            return true;
-                        }
-                        if (act == MotionEvent.ACTION_MOVE) {
-                            float dy = event.getRawY() - startRawY;
-                            float stepPx = Math.max(dp(44), r.getHeight() + dp(6));
-                            if (dy > stepPx * 0.7f && curIdx < favs.size() - 1) {
-                                Collections.swap(favs, curIdx, curIdx + 1);
-                                curIdx++;
-                                startRawY += stepPx;
-                                r.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
-                                updateDragRowLabels(listCol, favs, byKey);
-                            } else if (dy < -stepPx * 0.7f && curIdx > 0) {
-                                Collections.swap(favs, curIdx, curIdx - 1);
-                                curIdx--;
-                                startRawY -= stepPx;
-                                r.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
-                                updateDragRowLabels(listCol, favs, byKey);
-                            }
-                            return true;
-                        }
-                        if (act == MotionEvent.ACTION_UP || act == MotionEvent.ACTION_CANCEL) {
-                            r.setAlpha(1f);
-                            r.setScaleX(1f);
-                            r.setScaleY(1f);
-                            refreshUi[0].run();
-                            return true;
-                        }
-                        return false;
-                    }
+        currentSheetDialog = AppPickerSheet.showDragReorder(
+                appPickerHost(),
+                "调整常用应用顺序",
+                "按住左侧手柄上下拖拽，或点击右侧箭头调整顺序",
+                favs,
+                allApps,
+                ordered -> {
+                    putStringList(K_FAVS, ordered);
+                    rebuildStreamRows();
                 });
-                r.addView(dragHandle, new LinearLayout.LayoutParams(dp(34), dp(40)));
-
-                TextView tv = makeText((i + 1) + ".  " + byKey.get(favs.get(i)).label, 15f, theme.textPrimary, true);
-                r.addView(tv, new LinearLayout.LayoutParams(0, dp(40), 1f));
-                tv.setGravity(Gravity.CENTER_VERTICAL);
-
-                for (int k = 0; k < 2; k++) {
-                    final int delta = (k == 0) ? -1 : 1;
-                    TextView arrow = makeText(k == 0 ? "▲" : "▼", 15f, theme.accent, true);
-                    arrow.setGravity(Gravity.CENTER);
-                    boolean valid = idx + delta >= 0 && idx + delta < favs.size();
-                    arrow.setAlpha(valid ? 1f : 0.22f);
-                    if (valid) {
-                        arrow.setOnClickListener(v -> {
-                            Collections.swap(favs, idx, idx + delta);
-                            refreshUi[0].run();
-                        });
-                    }
-                    r.addView(arrow, new LinearLayout.LayoutParams(dp(38), dp(40)));
-                }
-                LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-                rlp.topMargin = dp(6);
-                listCol.addView(r, rlp);
-            }
-        };
-        refreshUi[0].run();
-        box.addView(listCol);
-
-        TextView saveBtn = makeSheetButton("✓ 保存顺序", () -> {
-            putStringList(K_FAVS, favs);
-            rebuildStreamRows();
-            dismiss.run();
-        });
-        saveBtn.setBackground(theme.solidAccentButton(dpUnit, 14));
-        saveBtn.setTextColor(0xFFFFFFFF);
-        LinearLayout.LayoutParams sLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        sLp.topMargin = dp(8);
-        box.addView(saveBtn, sLp);
-
-        holder[0] = showBottomSheetDialog(box);
-    }
-
-    private void updateDragRowLabels(LinearLayout listCol, List<String> favs, Map<String, AppEntry> byKey) {
-        for (int i = 0; i < Math.min(listCol.getChildCount(), favs.size()); i++) {
-            View child = listCol.getChildAt(i);
-            if (child instanceof LinearLayout && ((LinearLayout) child).getChildCount() >= 2) {
-                View tv = ((LinearLayout) child).getChildAt(1);
-                if (tv instanceof TextView) {
-                    AppEntry a = byKey.get(favs.get(i));
-                    if (a != null) ((TextView) tv).setText((i + 1) + ".  " + a.label);
-                }
-            }
-        }
     }
 
     // ---------- App Pop-up 关联子应用集合 ----------
@@ -5303,204 +4850,32 @@ public class MainActivity extends Activity {
             candidates.add(a);
         }
         final List<String> curKeys = new ArrayList<>(getAppPopupChildKeysCached(parent.idKey));
-        final Set<String> selectedKeys = new LinkedHashSet<>(curKeys);
-
-        final LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        final Dialog[] holder = new Dialog[1];
-        final Runnable dismiss = () -> { if (holder[0] != null) holder[0].dismiss(); };
-
-        LinearLayout topHeader = new LinearLayout(this);
-        topHeader.setOrientation(LinearLayout.HORIZONTAL);
-        topHeader.setGravity(Gravity.CENTER_VERTICAL);
-        TextView titleTv = makeText("管理「" + parent.label + "」Pop-up", 17.5f, theme.textPrimary, true);
-        topHeader.addView(titleTv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
-        final TextView countBadge = makeText("已选 " + selectedKeys.size() + " 个", 12f, theme.accent, true);
-        countBadge.setBackground(theme.accentGlowPill(dpUnit, 10));
-        countBadge.setPadding(dp(10), dp(4), dp(10), dp(4));
-        topHeader.addView(countBadge);
-        box.addView(topHeader);
-
-        TextView tip = makeText("在首页对「" + parent.label + "」右滑即可原地展开所选关联应用", 11.8f, theme.textSecondary, false);
-        tip.setPadding(0, dp(2), 0, dp(8));
-        box.addView(tip);
-
-        final EditText searchBox = new EditText(this);
-        searchBox.setHint("按字母或名称查找关联应用…");
-        styleGlassEditText(searchBox, "按字母或名称查找关联应用…");
-        searchBox.setSingleLine(true);
-        searchBox.setImeOptions(EditorInfo.IME_ACTION_DONE);
-        box.addView(searchBox);
-
-        final List<String> letters = new ArrayList<>();
-        letters.add("全部");
-        letters.add("已选");
-        for (char c = 'A'; c <= 'Z'; c++) {
-            for (AppEntry a : candidates) {
-                if (a.groupChar == c) {
-                    letters.add(String.valueOf(c));
-                    break;
-                }
-            }
-        }
-        for (AppEntry a : candidates) {
-            if (a.groupChar == '#') {
-                letters.add("#");
-                break;
-            }
-        }
-
-        HorizontalScrollView letterScroll = new HorizontalScrollView(this);
-        letterScroll.setHorizontalScrollBarEnabled(false);
-        letterScroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
-        final LinearLayout letterRow = new LinearLayout(this);
-        letterRow.setOrientation(LinearLayout.HORIZONTAL);
-        letterRow.setGravity(Gravity.CENTER_VERTICAL);
-        letterRow.setPadding(0, dp(8), 0, dp(8));
-
-        final String[] curFilterLetter = new String[]{"全部"};
-        final List<TextView> letterPills = new ArrayList<>();
-        final LinearLayout gridContainer = new LinearLayout(this);
-        gridContainer.setOrientation(LinearLayout.VERTICAL);
-
-        final TextView saveBtn = makeSheetButton("保存关联 (" + selectedKeys.size() + ")", null);
-
-        final Runnable refreshGrid = new Runnable() {
-            @Override
-            public void run() {
-                gridContainer.removeAllViews();
-                String filter = curFilterLetter[0];
-                String query = searchBox.getText().toString().trim().toLowerCase(Locale.ROOT);
-
-                List<AppEntry> matched = new ArrayList<>();
-                for (AppEntry a : candidates) {
-                    if ("已选".equals(filter)) {
-                        if (!selectedKeys.contains(a.idKey)) continue;
-                    } else if (!"全部".equals(filter)) {
-                        if (filter.length() == 1 && a.groupChar != filter.charAt(0)) continue;
-                    }
-                    if (!query.isEmpty()) {
-                        boolean hit = (a.label != null && a.label.toLowerCase(Locale.ROOT).contains(query))
-                                || (a.iniPy != null && a.iniPy.toLowerCase(Locale.ROOT).contains(query))
-                                || (a.fullPy != null && a.fullPy.toLowerCase(Locale.ROOT).contains(query))
-                                || (query.length() == 1 && Character.toUpperCase(query.charAt(0)) == a.groupChar);
-                        if (!hit) continue;
-                    }
-                    matched.add(a);
-                }
-
-                if (matched.isEmpty()) {
-                    TextView emptyTv = makeText("无匹配应用，请尝试其他字母或清空搜索", 12.5f, theme.textSecondary, false);
-                    emptyTv.setGravity(Gravity.CENTER);
-                    emptyTv.setPadding(0, dp(22), 0, dp(22));
-                    gridContainer.addView(emptyTv);
-                    return;
-                }
-
-                List<TextView> itemBtns = new ArrayList<>();
-                for (final AppEntry app : matched) {
-                    final boolean isChecked = selectedKeys.contains(app.idKey);
-                    final TextView btn = makeText(
-                            (isChecked ? "✓ " : "○ ") + app.label,
-                            13.2f,
-                            isChecked ? theme.accent : theme.textPrimary,
-                            isChecked);
-                    btn.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
-                    btn.setSingleLine(true);
-                    btn.setEllipsize(TextUtils.TruncateAt.END);
-                    btn.setBackground(isChecked ? theme.accentGlowPill(dpUnit, 14) : theme.sheetTileCard(dpUnit, 14));
-                    btn.setPadding(dp(12), dp(10), dp(12), dp(10));
-                    btn.setOnClickListener(v -> {
-                        if (selectedKeys.contains(app.idKey)) selectedKeys.remove(app.idKey);
-                        else selectedKeys.add(app.idKey);
-                        boolean nowChecked = selectedKeys.contains(app.idKey);
-                        btn.setText((nowChecked ? "✓ " : "○ ") + app.label);
-                        btn.setTextColor(nowChecked ? theme.accent : theme.textPrimary);
-                        btn.setTypeface(nowChecked ? Typeface.create(typeface, Typeface.BOLD) : typeface);
-                        btn.setBackground(nowChecked ? theme.accentGlowPill(dpUnit, 14) : theme.sheetTileCard(dpUnit, 14));
-                        countBadge.setText("已选 " + selectedKeys.size() + " 个");
-                        saveBtn.setText("保存关联 (" + selectedKeys.size() + ")");
-                        if ("已选".equals(curFilterLetter[0])) run();
-                    });
-                    itemBtns.add(btn);
-                }
-                addGridButtons(gridContainer, itemBtns, 2);
-            }
-        };
-
-        for (int i = 0; i < letters.size(); i++) {
-            final String l = letters.get(i);
-            final TextView pill = makeText(l, 12.0f, theme.textSecondary, false);
-            pill.setGravity(Gravity.CENTER);
-            pill.setPadding(dp(11), dp(5), dp(11), dp(5));
-            pill.setBackground(theme.subtleGhostPill(dpUnit, 10));
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            lp.rightMargin = dp(6);
-            pill.setLayoutParams(lp);
-            pill.setOnClickListener(v -> {
-                curFilterLetter[0] = l;
-                for (TextView p : letterPills) {
-                    boolean active = l.equals(p.getText().toString());
-                    p.setTextColor(active ? theme.accent : theme.textSecondary);
-                    p.setTypeface(active ? Typeface.create(typeface, Typeface.BOLD) : typeface);
-                    p.setBackground(active ? theme.accentGlowPill(dpUnit, 10) : theme.subtleGhostPill(dpUnit, 10));
-                }
-                refreshGrid.run();
-            });
-            if (i == 0) {
-                pill.setTextColor(theme.accent);
-                pill.setTypeface(Typeface.create(typeface, Typeface.BOLD));
-                pill.setBackground(theme.accentGlowPill(dpUnit, 10));
-            }
-            letterPills.add(pill);
-            letterRow.addView(pill);
-        }
-        letterScroll.addView(letterRow);
-        box.addView(letterScroll);
-
-        searchBox.addTextChangedListener(new TextWatcher() {
-            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
-            @Override public void onTextChanged(CharSequence s, int start, int before, int count) { refreshGrid.run(); }
-            @Override public void afterTextChanged(Editable s) {}
-        });
-
-        box.addView(gridContainer);
-        refreshGrid.run();
-
-        List<TextView> actions = new ArrayList<>();
-        actions.add(makeSheetButton("取消", dismiss));
-        saveBtn.setOnClickListener(v -> {
-            try {
-                JSONObject obj = getAppPopupsJson();
-                JSONArray next = new JSONArray();
-                Set<String> written = new HashSet<>();
-                for (String k : curKeys) {
-                    if (selectedKeys.contains(k) && written.add(k)) next.put(k);
-                }
-                for (AppEntry a : candidates) {
-                    if (selectedKeys.contains(a.idKey) && written.add(a.idKey)) next.put(a.idKey);
-                }
-                if (next.length() == 0) obj.remove(parent.idKey);
-                else obj.put(parent.idKey, next);
-                prefs.edit().putString(K_APP_POPUPS, obj.toString()).apply();
-                invalidateAppPopupsCache();
-                if (streamAdapter != null) streamAdapter.notifyDataSetChanged();
-                Toast.makeText(MainActivity.this,
-                        next.length() == 0
-                                ? "已清空「" + parent.label + "」关联 Pop-up"
-                                : "已更新「" + parent.label + "」关联 Pop-up（" + next.length() + " 个应用）",
-                        Toast.LENGTH_SHORT).show();
-            } catch (Throwable ignored) {}
-            dismiss.run();
-        });
-        saveBtn.setBackground(theme.solidAccentButton(dpUnit, 14));
-        saveBtn.setTextColor(0xFFFFFFFF);
-        actions.add(saveBtn);
-        addGridButtons(box, actions, 2);
-
-        holder[0] = showBottomSheetDialog(box);
+        currentSheetDialog = AppPickerSheet.showMultiSelect(
+                appPickerHost(),
+                "管理「" + parent.label + "」Pop-up",
+                "在首页对「" + parent.label + "」右滑即可原地展开所选关联应用",
+                candidates,
+                curKeys,
+                "取消",
+                null,
+                "保存关联",
+                updated -> {
+                    try {
+                        JSONObject obj = getAppPopupsJson();
+                        JSONArray next = new JSONArray();
+                        for (String k : updated) next.put(k);
+                        if (next.length() == 0) obj.remove(parent.idKey);
+                        else obj.put(parent.idKey, next);
+                        prefs.edit().putString(K_APP_POPUPS, obj.toString()).apply();
+                        invalidateAppPopupsCache();
+                        if (streamAdapter != null) streamAdapter.notifyDataSetChanged();
+                        Toast.makeText(MainActivity.this,
+                                next.length() == 0
+                                        ? "已清空「" + parent.label + "」关联 Pop-up"
+                                        : "已更新「" + parent.label + "」关联 Pop-up（" + next.length() + " 个应用）",
+                                Toast.LENGTH_SHORT).show();
+                    } catch (Throwable ignored) {}
+                });
     }
 
     // ---------- 文件夹管理 ----------
@@ -5534,7 +4909,7 @@ public class MainActivity extends Activity {
 
         List<TextView> btns = new ArrayList<>();
         btns.add(makeSheetButton("取消", dismiss));
-        TextView createBtn = makeSheetButton("✓ 创建文件夹", () -> {
+        TextView createBtn = makeSheetButton("创建文件夹", () -> {
             String name = input.getText().toString().trim();
             if (name.isEmpty()) return;
             dismiss.run();
@@ -5574,111 +4949,23 @@ public class MainActivity extends Activity {
                 if (!k.isEmpty() && !curOrdered.contains(k)) curOrdered.add(k);
             }
         }
-        final Set<String> selectedKeys = new LinkedHashSet<>(curOrdered);
-
-        final LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        final Dialog[] holder = new Dialog[1];
-        final Runnable dismiss = () -> { if (holder[0] != null) holder[0].dismiss(); };
-
-        LinearLayout topHdr = new LinearLayout(this);
-        topHdr.setGravity(Gravity.CENTER_VERTICAL);
-        topHdr.addView(makeText("勾选「" + fo.optString("name") + "」内应用", 17.5f, theme.textPrimary, true),
-                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        final TextView badge = makeText("已选 " + selectedKeys.size() + " 个", 12f, theme.accent, true);
-        badge.setBackground(theme.accentGlowPill(dpUnit, 10));
-        badge.setPadding(dp(10), dp(4), dp(10), dp(4));
-        topHdr.addView(badge);
-        box.addView(topHdr);
-
-        final EditText searchBox = new EditText(this);
-        styleGlassEditText(searchBox, "按名称或拼音筛选应用…");
-        searchBox.setSingleLine(true);
-        LinearLayout.LayoutParams sblp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        sblp.topMargin = dp(8);
-        sblp.bottomMargin = dp(6);
-        box.addView(searchBox, sblp);
-
-        final LinearLayout gridContainer = new LinearLayout(this);
-        gridContainer.setOrientation(LinearLayout.VERTICAL);
-        final TextView saveBtn = makeSheetButton("保存文件夹 (" + selectedKeys.size() + ")", null);
-
-        final Runnable refreshGrid = () -> {
-            gridContainer.removeAllViews();
-            String q = searchBox.getText().toString().trim().toLowerCase(Locale.ROOT);
-            List<TextView> itemBtns = new ArrayList<>();
-            for (final AppEntry app : candidates) {
-                if (!q.isEmpty()) {
-                    boolean hit = (app.label != null && app.label.toLowerCase(Locale.ROOT).contains(q))
-                            || (app.iniPy != null && app.iniPy.toLowerCase(Locale.ROOT).contains(q))
-                            || (app.fullPy != null && app.fullPy.toLowerCase(Locale.ROOT).contains(q));
-                    if (!hit) continue;
-                }
-                final boolean isChecked = selectedKeys.contains(app.idKey);
-                final TextView btn = makeText(
-                        (isChecked ? "✓ " : "○ ") + app.label,
-                        13.2f,
-                        isChecked ? theme.accent : theme.textPrimary,
-                        isChecked);
-                btn.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
-                btn.setSingleLine(true);
-                btn.setEllipsize(TextUtils.TruncateAt.END);
-                btn.setBackground(isChecked ? theme.accentGlowPill(dpUnit, 14) : theme.sheetTileCard(dpUnit, 14));
-                btn.setPadding(dp(12), dp(10), dp(12), dp(10));
-                btn.setOnClickListener(v -> {
-                    if (selectedKeys.contains(app.idKey)) selectedKeys.remove(app.idKey);
-                    else selectedKeys.add(app.idKey);
-                    boolean now = selectedKeys.contains(app.idKey);
-                    btn.setText((now ? "✓ " : "○ ") + app.label);
-                    btn.setTextColor(now ? theme.accent : theme.textPrimary);
-                    btn.setTypeface(now ? Typeface.create(typeface, Typeface.BOLD) : typeface);
-                    btn.setBackground(now ? theme.accentGlowPill(dpUnit, 14) : theme.sheetTileCard(dpUnit, 14));
-                    badge.setText("已选 " + selectedKeys.size() + " 个");
-                    saveBtn.setText("保存文件夹 (" + selectedKeys.size() + ")");
+        currentSheetDialog = AppPickerSheet.showMultiSelect(
+                appPickerHost(),
+                "勾选「" + fo.optString("name") + "」内应用",
+                "按字母或名称快速筛选",
+                candidates,
+                curOrdered,
+                "取消",
+                null,
+                "保存文件夹",
+                updated -> {
+                    try {
+                        JSONArray next = new JSONArray();
+                        for (String k : updated) next.put(k);
+                        fo.put("apps", next);
+                        saveFoldersArray(arr);
+                    } catch (Throwable ignored) {}
                 });
-                itemBtns.add(btn);
-            }
-            if (itemBtns.isEmpty()) {
-                TextView emptyTv = makeText("无匹配应用", 12.5f, theme.textSecondary, false);
-                emptyTv.setGravity(Gravity.CENTER);
-                emptyTv.setPadding(0, dp(20), 0, dp(20));
-                gridContainer.addView(emptyTv);
-            } else {
-                addGridButtons(gridContainer, itemBtns, 2);
-            }
-        };
-        searchBox.addTextChangedListener(new TextWatcher() {
-            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
-            @Override public void onTextChanged(CharSequence s, int start, int before, int count) { refreshGrid.run(); }
-            @Override public void afterTextChanged(Editable s) {}
-        });
-        box.addView(gridContainer);
-        refreshGrid.run();
-
-        saveBtn.setOnClickListener(v -> {
-            try {
-                JSONArray next = new JSONArray();
-                Set<String> seen = new HashSet<>();
-                for (String k : curOrdered) {
-                    if (selectedKeys.contains(k) && seen.add(k)) next.put(k);
-                }
-                for (AppEntry a : candidates) {
-                    if (selectedKeys.contains(a.idKey) && seen.add(a.idKey)) next.put(a.idKey);
-                }
-                fo.put("apps", next);
-                saveFoldersArray(arr);
-            } catch (Throwable ignored) {}
-            dismiss.run();
-        });
-        saveBtn.setBackground(theme.solidAccentButton(dpUnit, 14));
-        saveBtn.setTextColor(0xFFFFFFFF);
-        LinearLayout.LayoutParams sLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        sLp.topMargin = dp(8);
-        box.addView(saveBtn, sLp);
-
-        holder[0] = showBottomSheetDialog(box);
     }
 
     private void promptRenameFolder(final int folderIdx) {
@@ -5724,137 +5011,28 @@ public class MainActivity extends Activity {
         final JSONArray arr = getFoldersArray();
         final JSONObject fo = arr.optJSONObject(folderIdx);
         if (fo == null) return;
-        final Map<String, AppEntry> byKey = new HashMap<>();
-        for (AppEntry a : allApps) byKey.put(a.idKey, a);
         final List<String> keys = new ArrayList<>();
         JSONArray cur = fo.optJSONArray("apps");
         if (cur != null) {
             for (int i = 0; i < cur.length(); i++) {
                 String k = cur.optString(i, "");
-                if (!k.isEmpty() && byKey.containsKey(k) && !keys.contains(k)) keys.add(k);
+                if (!k.isEmpty() && !keys.contains(k)) keys.add(k);
             }
         }
-        if (keys.size() < 2) {
-            Toast.makeText(this, "文件夹内至少需要 2 个应用才可调整顺序", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        final LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        final Dialog[] holder = new Dialog[1];
-        final Runnable dismiss = () -> { if (holder[0] != null) holder[0].dismiss(); };
-
-        box.addView(makeText("调整「" + fo.optString("name", "文件夹") + "」内应用顺序", 17.5f, theme.textPrimary, true));
-        TextView dragTip = makeText("按住左侧 ≡ 上下拖拽，或点击右侧箭头调整顺序（首位将用于点击直开）", 12f, theme.textSecondary, false);
-        dragTip.setPadding(0, dp(2), 0, dp(6));
-        box.addView(dragTip);
-
-        final LinearLayout listCol = new LinearLayout(this);
-        listCol.setOrientation(LinearLayout.VERTICAL);
-        listCol.setPadding(0, dp(4), 0, dp(8));
-
-        final Runnable[] refreshUi = new Runnable[1];
-        refreshUi[0] = () -> {
-            listCol.removeAllViews();
-            for (int i = 0; i < keys.size(); i++) {
-                final int idx = i;
-                final LinearLayout r = new LinearLayout(this);
-                r.setGravity(Gravity.CENTER_VERTICAL);
-                r.setBackground(theme.sheetTileCard(dpUnit, 14));
-                r.setPadding(dp(10), dp(6), dp(8), dp(6));
-
-                TextView dragHandle = makeText("≡", 18f, theme.accent, true);
-                dragHandle.setGravity(Gravity.CENTER);
-                dragHandle.setOnTouchListener(new View.OnTouchListener() {
-                    private float startRawY;
-                    private int curIdx = idx;
-
-                    @Override
-                    public boolean onTouch(View v, MotionEvent event) {
-                        int act = event.getActionMasked();
-                        if (act == MotionEvent.ACTION_DOWN) {
-                            startRawY = event.getRawY();
-                            curIdx = idx;
-                            v.getParent().getParent().requestDisallowInterceptTouchEvent(true);
-                            r.setAlpha(0.85f);
-                            r.setScaleX(1.02f);
-                            r.setScaleY(1.02f);
-                            r.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
-                            return true;
-                        }
-                        if (act == MotionEvent.ACTION_MOVE) {
-                            float dy = event.getRawY() - startRawY;
-                            float stepPx = Math.max(dp(44), r.getHeight() + dp(6));
-                            if (dy > stepPx * 0.7f && curIdx < keys.size() - 1) {
-                                Collections.swap(keys, curIdx, curIdx + 1);
-                                curIdx++;
-                                startRawY += stepPx;
-                                r.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
-                                updateDragRowLabels(listCol, keys, byKey);
-                            } else if (dy < -stepPx * 0.7f && curIdx > 0) {
-                                Collections.swap(keys, curIdx, curIdx - 1);
-                                curIdx--;
-                                startRawY -= stepPx;
-                                r.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
-                                updateDragRowLabels(listCol, keys, byKey);
-                            }
-                            return true;
-                        }
-                        if (act == MotionEvent.ACTION_UP || act == MotionEvent.ACTION_CANCEL) {
-                            r.setAlpha(1f);
-                            r.setScaleX(1f);
-                            r.setScaleY(1f);
-                            refreshUi[0].run();
-                            return true;
-                        }
-                        return false;
-                    }
+        currentSheetDialog = AppPickerSheet.showDragReorder(
+                appPickerHost(),
+                "调整「" + fo.optString("name", "文件夹") + "」内应用顺序",
+                "按住左侧手柄上下拖拽，或点击右侧箭头调整顺序（首位将用于点击直开）",
+                keys,
+                allApps,
+                ordered -> {
+                    try {
+                        JSONArray next = new JSONArray();
+                        for (String k : ordered) next.put(k);
+                        fo.put("apps", next);
+                        saveFoldersArray(arr);
+                    } catch (Throwable ignored) {}
                 });
-                r.addView(dragHandle, new LinearLayout.LayoutParams(dp(34), dp(40)));
-
-                TextView tv = makeText((i + 1) + ".  " + byKey.get(keys.get(i)).label, 15f, theme.textPrimary, true);
-                tv.setGravity(Gravity.CENTER_VERTICAL);
-                r.addView(tv, new LinearLayout.LayoutParams(0, dp(40), 1f));
-
-                for (int k = 0; k < 2; k++) {
-                    final int delta = (k == 0) ? -1 : 1;
-                    TextView arrow = makeText(k == 0 ? "▲" : "▼", 15f, theme.accent, true);
-                    arrow.setGravity(Gravity.CENTER);
-                    boolean valid = idx + delta >= 0 && idx + delta < keys.size();
-                    arrow.setAlpha(valid ? 1f : 0.22f);
-                    if (valid) {
-                        arrow.setOnClickListener(v -> {
-                            Collections.swap(keys, idx, idx + delta);
-                            refreshUi[0].run();
-                        });
-                    }
-                    r.addView(arrow, new LinearLayout.LayoutParams(dp(38), dp(40)));
-                }
-                LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-                rlp.topMargin = dp(6);
-                listCol.addView(r, rlp);
-            }
-        };
-        refreshUi[0].run();
-        box.addView(listCol);
-
-        TextView saveBtn = makeSheetButton("保存顺序", () -> {
-            try {
-                JSONArray next = new JSONArray();
-                for (String k : keys) next.put(k);
-                fo.put("apps", next);
-                saveFoldersArray(arr);
-            } catch (Throwable ignored) {}
-            dismiss.run();
-        });
-        saveBtn.setBackground(theme.solidAccentButton(dpUnit, 14));
-        saveBtn.setTextColor(0xFFFFFFFF);
-        LinearLayout.LayoutParams sLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        sLp.topMargin = dp(8);
-        box.addView(saveBtn, sLp);
-
-        holder[0] = showBottomSheetDialog(box);
     }
 
     private boolean toggleFolderTapLaunchFirst(int folderIdx) {
@@ -5986,7 +5164,7 @@ public class MainActivity extends Activity {
         if (activeMediaController == null) return;
         PendingIntent pi = activeMediaController.getSessionActivity();
         if (pi != null) {
-            try { launchedExternalApp = true; pi.send(); return; } catch (Throwable ignored) {}
+            try { pi.send(); return; } catch (Throwable ignored) {}
         }
         Intent i = getPackageManager().getLaunchIntentForPackage(activeMediaController.getPackageName());
         if (i != null) startIntentSafely(i);
@@ -6194,7 +5372,6 @@ public class MainActivity extends Activity {
             Intent i = km.createConfirmDeviceCredentialIntent("验证身份", "查看已隐藏的应用");
             if (i == null) { task.run(); return; }
             pendingAuthTask = task;
-            launchedExternalApp = true;
             startActivityForResult(i, REQ_CRED_UNLOCK);
         }
     }
@@ -6210,7 +5387,7 @@ public class MainActivity extends Activity {
             AppEntry a = findAppByKey(hidden.get(i));
             names[i] = a != null ? a.label : hidden.get(i);
         }
-        showSingleChoiceDialog("🙈 已隐藏的应用（点选恢复显示到桌面）", names, 0, w -> {
+        showSingleChoiceDialog("已隐藏的应用（点选恢复显示到桌面）", names, 0, w -> {
             final String k = hidden.get(w);
             hidden.remove(k);
             putStringList(K_HIDDEN, hidden);
@@ -6270,7 +5447,6 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        launchedExternalApp = false;
         if (widgetHelper != null && widgetHelper.handleActivityResult(
                 this, prefs, requestCode, resultCode, data, this::refreshHomeWidgets)) {
             return;
@@ -6500,11 +5676,9 @@ public class MainActivity extends Activity {
 
     private boolean startIntentSafely(Intent i) {
         try {
-            launchedExternalApp = true;
             startActivity(i);
             return true;
         } catch (Throwable t) {
-            launchedExternalApp = false;
             Toast.makeText(this, "无法打开对应系统界面", Toast.LENGTH_SHORT).show();
             return false;
         }

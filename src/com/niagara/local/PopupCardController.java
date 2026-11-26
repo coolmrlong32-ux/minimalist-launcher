@@ -70,7 +70,6 @@ final class PopupCardController {
         void openAddAppToFolder(MainActivity.AppEntry app);
         void openControlCenter();
         void hideSoftKeyboard();
-        void markLaunchedExternalApp(boolean launched);
         List<MainActivity.AppEntry> getAppPopupChildren(MainActivity.AppEntry parent);
         void openEditAppPopupChildren(MainActivity.AppEntry parent);
         void removeAppPopupChild(MainActivity.AppEntry parent, MainActivity.AppEntry child);
@@ -204,28 +203,28 @@ final class PopupCardController {
         hdr.addView(titleTap, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
         final boolean isFav = host.isFavorite(app);
-        hdr.addView(makeHeaderIconBtn(isFav ? PopupGlyphView.IC_STAR_FILLED : PopupGlyphView.IC_STAR,
+        hdr.addView(makeHeaderIconBtn(isFav ? VectorGlyphView.IC_STAR_FILLED : VectorGlyphView.IC_STAR,
                 isFav ? theme.accent : theme.textSecondary, () -> {
                     dismiss(true);
                     host.toggleFavorite(app);
                 }));
-        hdr.addView(makeHeaderIconBtn(PopupGlyphView.IC_PLUS, theme.textSecondary, () -> {
+        hdr.addView(makeHeaderIconBtn(VectorGlyphView.IC_PLUS, theme.textSecondary, () -> {
             dismiss(false);
             host.openEditAppPopupChildren(app);
         }));
 
-        final LinearLayout toolsPanel = buildAppEditToolbar(app, isFav);
+        final LinearLayout toolsPanel = buildAppEditToolbar(app);
         toolsPanel.setVisibility(showFullTools ? View.VISIBLE : View.GONE);
 
-        final FrameLayout moreToggleBtn = makeHeaderIconBtn(PopupGlyphView.IC_MORE,
+        final FrameLayout moreToggleBtn = makeHeaderIconBtn(VectorGlyphView.IC_MORE,
                 showFullTools ? theme.accent : theme.textSecondary, null);
         moreToggleBtn.setOnClickListener(v -> {
             v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
             boolean nextVis = toolsPanel.getVisibility() != View.VISIBLE;
             toolsPanel.setVisibility(nextVis ? View.VISIBLE : View.GONE);
             View g = moreToggleBtn.getChildAt(0);
-            if (g instanceof PopupGlyphView) {
-                ((PopupGlyphView) g).setColor(nextVis ? theme.accent : theme.textSecondary);
+            if (g instanceof VectorGlyphView) {
+                ((VectorGlyphView) g).setColor(nextVis ? theme.accent : theme.textSecondary);
             }
             if (relayoutCard[0] != null) relayoutCard[0].run();
         });
@@ -238,7 +237,7 @@ final class PopupCardController {
         // 2. 未读通知区（至多 3 条）
         final List<NotificationHubService.NotifItem> notifs = NotificationHubService.getAllByPackage(pkg);
         if (!notifs.isEmpty()) {
-            LinearLayout nHdr = buildSectionHeader(PopupGlyphView.IC_BELL, "未读通知 " + notifs.size(),
+            LinearLayout nHdr = buildSectionHeader(VectorGlyphView.IC_BELL, "未读通知 " + notifs.size(),
                     "全部清除", () -> {
                         int cleared = NotificationHubService.cancelAllForPackage(pkg);
                         Toast.makeText(act, cleared > 0 ? "已清除全部通知" : "没有可清除的通知", Toast.LENGTH_SHORT).show();
@@ -259,7 +258,7 @@ final class PopupCardController {
         // 3. App Pop-up 关联子应用集合
         final List<MainActivity.AppEntry> popupChildren = host.getAppPopupChildren(app);
         if (!popupChildren.isEmpty()) {
-            content.addView(buildSectionHeader(PopupGlyphView.IC_LAYERS, "关联集合", "管理", () -> {
+            content.addView(buildSectionHeader(VectorGlyphView.IC_LAYERS, "关联集合", "管理", () -> {
                 dismiss(false);
                 host.openEditAppPopupChildren(app);
             }));
@@ -280,7 +279,7 @@ final class PopupCardController {
         // 4. 原生动态快捷方式（至多 4 个）
         final List<ShortcutInfo> shortcuts = host.queryPopupShortcuts(app);
         if (!shortcuts.isEmpty()) {
-            content.addView(buildSectionHeader(PopupGlyphView.IC_SHORTCUT, "快捷方式", null, null));
+            content.addView(buildSectionHeader(VectorGlyphView.IC_SHORTCUT, "快捷方式", null, null));
             for (final ShortcutInfo sc : shortcuts) {
                 LinearLayout sRow = new LinearLayout(act);
                 sRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -313,7 +312,7 @@ final class PopupCardController {
             addRow.setGravity(Gravity.CENTER_VERTICAL);
             addRow.setBackground(theme.subtleGhostPill(host.getDp(), 12));
             addRow.setPadding(dp(10), dp(8), dp(10), dp(8));
-            PopupGlyphView plusIc = new PopupGlyphView(act, PopupGlyphView.IC_PLUS, theme.accent, host.getDp());
+            VectorGlyphView plusIc = new VectorGlyphView(act, VectorGlyphView.IC_PLUS, theme.accent, host.getDp());
             LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(dp(14), dp(14));
             plp.rightMargin = dp(8);
             addRow.addView(plusIc, plp);
@@ -358,7 +357,7 @@ final class PopupCardController {
         hdr.setGravity(Gravity.CENTER_VERTICAL);
         hdr.setPadding(0, 0, 0, dp(4));
 
-        PopupGlyphView fIcon = new PopupGlyphView(act, PopupGlyphView.IC_FOLDER, theme.accent, host.getDp());
+        VectorGlyphView fIcon = new VectorGlyphView(act, VectorGlyphView.IC_FOLDER, theme.accent, host.getDp());
         LinearLayout.LayoutParams fiLp = new LinearLayout.LayoutParams(dp(18), dp(18));
         fiLp.rightMargin = dp(8);
         hdr.addView(fIcon, fiLp);
@@ -368,7 +367,7 @@ final class PopupCardController {
         title.setEllipsize(TextUtils.TruncateAt.END);
         hdr.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-        hdr.addView(makeHeaderIconBtn(PopupGlyphView.IC_PLUS, theme.textSecondary, () -> {
+        hdr.addView(makeHeaderIconBtn(VectorGlyphView.IC_PLUS, theme.textSecondary, () -> {
             dismiss(false);
             host.openEditFolderApps(folderIdx);
         }));
@@ -376,15 +375,15 @@ final class PopupCardController {
         final LinearLayout folderTools = buildFolderEditToolbar(folderIdx, fo.optBoolean("tapLaunchFirst", false));
         folderTools.setVisibility(showEditTools ? View.VISIBLE : View.GONE);
 
-        final FrameLayout moreBtn = makeHeaderIconBtn(PopupGlyphView.IC_MORE,
+        final FrameLayout moreBtn = makeHeaderIconBtn(VectorGlyphView.IC_MORE,
                 showEditTools ? theme.accent : theme.textSecondary, null);
         moreBtn.setOnClickListener(v -> {
             v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
             boolean nextVis = folderTools.getVisibility() != View.VISIBLE;
             folderTools.setVisibility(nextVis ? View.VISIBLE : View.GONE);
             View g = moreBtn.getChildAt(0);
-            if (g instanceof PopupGlyphView) {
-                ((PopupGlyphView) g).setColor(nextVis ? theme.accent : theme.textSecondary);
+            if (g instanceof VectorGlyphView) {
+                ((VectorGlyphView) g).setColor(nextVis ? theme.accent : theme.textSecondary);
             }
             if (relayoutCard[0] != null) relayoutCard[0].run();
         });
@@ -419,7 +418,7 @@ final class PopupCardController {
         presentAnchoredCard(anchorView, card, content, false, relayoutCard);
     }
 
-    private LinearLayout buildAppEditToolbar(final MainActivity.AppEntry app, final boolean isFav) {
+    private LinearLayout buildAppEditToolbar(final MainActivity.AppEntry app) {
         Activity act = host.getActivity();
         AuroraTheme theme = host.getThemeObj();
         LinearLayout panel = new LinearLayout(act);
@@ -434,22 +433,17 @@ final class PopupCardController {
 
         LinearLayout row1 = new LinearLayout(act);
         row1.setOrientation(LinearLayout.HORIZONTAL);
-        row1.addView(makeToolCell(isFav ? PopupGlyphView.IC_STAR_FILLED : PopupGlyphView.IC_STAR,
-                isFav ? "移出常用" : "加入常用", isFav ? theme.accent : theme.textPrimary, () -> {
-                    dismiss(true);
-                    host.toggleFavorite(app);
-                }));
-        row1.addView(makeToolCell(PopupGlyphView.IC_LAYERS, "关联集合", theme.textPrimary, () -> {
-            dismiss(false);
-            host.openEditAppPopupChildren(app);
-        }));
-        row1.addView(makeToolCell(PopupGlyphView.IC_EDIT, "重命名", theme.textPrimary, () -> {
+        row1.addView(makeToolCell(VectorGlyphView.IC_EDIT, "重命名", theme.textPrimary, () -> {
             dismiss(false);
             host.openRenameApp(app);
         }));
-        row1.addView(makeToolCell(PopupGlyphView.IC_ICON, "换图标", theme.textPrimary, () -> {
+        row1.addView(makeToolCell(VectorGlyphView.IC_SHAPES, "换图标", theme.textPrimary, () -> {
             dismiss(false);
             host.openCustomAppIcon(app);
+        }));
+        row1.addView(makeToolCell(VectorGlyphView.IC_FOLDER, "进文件夹", theme.textPrimary, () -> {
+            dismiss(false);
+            host.openAddAppToFolder(app);
         }));
         panel.addView(row1);
 
@@ -458,19 +452,15 @@ final class PopupCardController {
         LinearLayout.LayoutParams r2lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         r2lp.topMargin = dp(4);
-        row2.addView(makeToolCell(PopupGlyphView.IC_FOLDER, "进文件夹", theme.textPrimary, () -> {
-            dismiss(false);
-            host.openAddAppToFolder(app);
-        }));
-        row2.addView(makeToolCell(PopupGlyphView.IC_INFO, "详情", theme.textPrimary, () -> {
+        row2.addView(makeToolCell(VectorGlyphView.IC_INFO, "详情", theme.textPrimary, () -> {
             dismiss(true);
             host.openAppDetails(app);
         }));
-        row2.addView(makeToolCell(PopupGlyphView.IC_EYE_OFF, "隐藏", theme.textPrimary, () -> {
+        row2.addView(makeToolCell(VectorGlyphView.IC_EYE_OFF, "隐藏", theme.textPrimary, () -> {
             dismiss(true);
             host.hideApp(app);
         }));
-        row2.addView(makeToolCell(PopupGlyphView.IC_TRASH, "卸载", 0xFFEF4444, () -> {
+        row2.addView(makeToolCell(VectorGlyphView.IC_TRASH, "卸载", 0xFFEF4444, () -> {
             dismiss(true);
             host.uninstallApp(app);
         }));
@@ -494,27 +484,23 @@ final class PopupCardController {
 
         LinearLayout row = new LinearLayout(act);
         row.setOrientation(LinearLayout.HORIZONTAL);
-        row.addView(makeToolCell(PopupGlyphView.IC_PLUS, "选应用", theme.textPrimary, () -> {
-            dismiss(false);
-            host.openEditFolderApps(folderIdx);
-        }));
-        row.addView(makeToolCell(PopupGlyphView.IC_EDIT, "重命名", theme.textPrimary, () -> {
+        row.addView(makeToolCell(VectorGlyphView.IC_EDIT, "重命名", theme.textPrimary, () -> {
             dismiss(false);
             host.openRenameFolder(folderIdx);
         }));
-        row.addView(makeToolCell(PopupGlyphView.IC_SORT, "排序", theme.textPrimary, () -> {
+        row.addView(makeToolCell(VectorGlyphView.IC_SORT, "排序", theme.textPrimary, () -> {
             dismiss(false);
             host.openReorderFolderApps(folderIdx);
         }));
 
         final boolean[] tapFirst = new boolean[]{initialTapLaunchFirst};
-        final LinearLayout tapModeCell = makeToolCell(PopupGlyphView.IC_SHORTCUT,
+        final LinearLayout tapModeCell = makeToolCell(VectorGlyphView.IC_SHORTCUT,
                 tapFirst[0] ? "直开首项" : "点开浮层",
                 tapFirst[0] ? theme.accent : theme.textPrimary, null);
         tapModeCell.setOnClickListener(v -> {
             v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
             tapFirst[0] = host.toggleFolderTapLaunchFirst(folderIdx);
-            PopupGlyphView gv = (PopupGlyphView) tapModeCell.getChildAt(0);
+            VectorGlyphView gv = (VectorGlyphView) tapModeCell.getChildAt(0);
             TextView tv = (TextView) tapModeCell.getChildAt(1);
             int c = tapFirst[0] ? theme.accent : theme.textPrimary;
             gv.setColor(c);
@@ -526,7 +512,7 @@ final class PopupCardController {
         });
         row.addView(tapModeCell);
 
-        row.addView(makeToolCell(PopupGlyphView.IC_TRASH, "删除", 0xFFEF4444, () -> {
+        row.addView(makeToolCell(VectorGlyphView.IC_TRASH, "删除", 0xFFEF4444, () -> {
             dismiss(true);
             host.deleteFolder(folderIdx);
         }));
@@ -537,9 +523,9 @@ final class PopupCardController {
     private FrameLayout makeHeaderIconBtn(int glyphType, int color, final Runnable onClick) {
         Activity act = host.getActivity();
         FrameLayout wrap = new FrameLayout(act);
-        PopupGlyphView gv = new PopupGlyphView(act, glyphType, color, host.getDp());
+        VectorGlyphView gv = new VectorGlyphView(act, glyphType, color, host.getDp());
         wrap.addView(gv, new FrameLayout.LayoutParams(dp(16), dp(16), Gravity.CENTER));
-        wrap.setLayoutParams(new LinearLayout.LayoutParams(dp(32), dp(32)));
+        wrap.setLayoutParams(new LinearLayout.LayoutParams(dp(36), dp(36)));
         if (onClick != null) {
             wrap.setOnClickListener(v -> {
                 v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
@@ -556,7 +542,7 @@ final class PopupCardController {
         cell.setGravity(Gravity.CENTER_HORIZONTAL);
         cell.setPadding(dp(2), dp(4), dp(2), dp(4));
 
-        PopupGlyphView gv = new PopupGlyphView(act, glyphType, color, host.getDp());
+        VectorGlyphView gv = new VectorGlyphView(act, glyphType, color, host.getDp());
         cell.addView(gv, new LinearLayout.LayoutParams(dp(17), dp(17)));
 
         TextView tv = makeText(label, 10.4f, color, false);
@@ -583,7 +569,7 @@ final class PopupCardController {
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(dp(2), dp(9), dp(2), dp(3));
 
-        PopupGlyphView gv = new PopupGlyphView(act, glyphType, theme.accent, host.getDp());
+        VectorGlyphView gv = new VectorGlyphView(act, glyphType, theme.accent, host.getDp());
         LinearLayout.LayoutParams glp = new LinearLayout.LayoutParams(dp(13), dp(13));
         glp.rightMargin = dp(6);
         row.addView(gv, glp);
@@ -684,7 +670,7 @@ final class PopupCardController {
         top.addView(col, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
         if (n.isClearable) {
-            FrameLayout xBtn = makeHeaderIconBtn(PopupGlyphView.IC_CLOSE, theme.textSecondary,
+            FrameLayout xBtn = makeHeaderIconBtn(VectorGlyphView.IC_CLOSE, theme.textSecondary,
                     () -> dismissPopupNotifRow(row, n));
             top.addView(xBtn);
         }
@@ -750,11 +736,10 @@ final class PopupCardController {
         if (n.contentIntent != null) {
             row.setOnClickListener(v -> {
                 try {
-                    host.markLaunchedExternalApp(true);
                     n.contentIntent.send();
                     dismiss(true);
                 } catch (Throwable t) {
-                    host.markLaunchedExternalApp(false);
+                    Toast.makeText(act, "通知跳转已失效", Toast.LENGTH_SHORT).show();
                 }
             });
         }
@@ -950,164 +935,5 @@ final class PopupCardController {
         scrim.animate().alpha(1f).setDuration(145).start();
         card.animate().alpha(1f).scaleX(1f).scaleY(1f).translationX(0f).setDuration(180)
                 .setInterpolator(new DecelerateInterpolator(1.6f)).start();
-    }
-
-    // ---------- 极简线性矢量图标（零 Emoji） ----------
-    private static final class PopupGlyphView extends View {
-        static final int IC_STAR = 0;
-        static final int IC_STAR_FILLED = 1;
-        static final int IC_PLUS = 2;
-        static final int IC_MORE = 3;
-        static final int IC_EDIT = 4;
-        static final int IC_ICON = 5;
-        static final int IC_INFO = 6;
-        static final int IC_EYE_OFF = 7;
-        static final int IC_TRASH = 8;
-        static final int IC_FOLDER = 9;
-        static final int IC_LAYERS = 10;
-        static final int IC_BELL = 11;
-        static final int IC_SHORTCUT = 12;
-        static final int IC_CLOSE = 13;
-        static final int IC_SORT = 14;
-
-        private final int type;
-        private final float dp;
-        private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint fillP = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final RectF r = new RectF();
-        private final Path path = new Path();
-
-        PopupGlyphView(android.content.Context ctx, int type, int color, float dp) {
-            super(ctx);
-            this.type = type;
-            this.dp = dp;
-            p.setColor(color);
-            p.setStyle(Paint.Style.STROKE);
-            p.setStrokeWidth(1.45f * dp);
-            p.setStrokeCap(Paint.Cap.ROUND);
-            p.setStrokeJoin(Paint.Join.ROUND);
-            fillP.setColor(color);
-            fillP.setStyle(Paint.Style.FILL);
-        }
-
-        void setColor(int color) {
-            p.setColor(color);
-            fillP.setColor(color);
-            invalidate();
-        }
-
-        @Override
-        protected void onDraw(Canvas c) {
-            float w = getWidth(), h = getHeight();
-            float cx = w * 0.5f, cy = h * 0.5f;
-            float u = Math.min(w, h) * 0.38f;
-
-            switch (type) {
-                case IC_STAR:
-                case IC_STAR_FILLED:
-                    path.reset();
-                    for (int i = 0; i < 10; i++) {
-                        double a = Math.toRadians(-90 + i * 36);
-                        float rad = (i % 2 == 0) ? u : u * 0.44f;
-                        float x = cx + (float) Math.cos(a) * rad;
-                        float y = cy + (float) Math.sin(a) * rad;
-                        if (i == 0) path.moveTo(x, y);
-                        else path.lineTo(x, y);
-                    }
-                    path.close();
-                    c.drawPath(path, type == IC_STAR_FILLED ? fillP : p);
-                    break;
-                case IC_PLUS:
-                    c.drawLine(cx - u * 0.85f, cy, cx + u * 0.85f, cy, p);
-                    c.drawLine(cx, cy - u * 0.85f, cx, cy + u * 0.85f, p);
-                    break;
-                case IC_MORE:
-                    float dr = 1.45f * dp;
-                    c.drawCircle(cx - u * 0.72f, cy, dr, fillP);
-                    c.drawCircle(cx, cy, dr, fillP);
-                    c.drawCircle(cx + u * 0.72f, cy, dr, fillP);
-                    break;
-                case IC_EDIT:
-                    c.drawLine(cx - u * 0.65f, cy + u * 0.65f, cx + u * 0.55f, cy - u * 0.55f, p);
-                    c.drawLine(cx - u * 0.85f, cy + u * 0.85f, cx + u * 0.85f, cy + u * 0.85f, p);
-                    break;
-                case IC_ICON:
-                    r.set(cx - u * 0.9f, cy - u * 0.9f, cx - 1f * dp, cy - 1f * dp);
-                    c.drawRoundRect(r, 1.5f * dp, 1.5f * dp, p);
-                    r.set(cx + 1f * dp, cy - u * 0.9f, cx + u * 0.9f, cy - 1f * dp);
-                    c.drawOval(r, p);
-                    r.set(cx - u * 0.9f, cy + 1f * dp, cx - 1f * dp, cy + u * 0.9f);
-                    c.drawOval(r, p);
-                    r.set(cx + 1f * dp, cy + 1f * dp, cx + u * 0.9f, cy + u * 0.9f);
-                    c.drawRoundRect(r, 1.5f * dp, 1.5f * dp, p);
-                    break;
-                case IC_INFO:
-                    c.drawCircle(cx, cy, u * 0.92f, p);
-                    c.drawLine(cx, cy - u * 0.05f, cx, cy + u * 0.45f, p);
-                    c.drawCircle(cx, cy - u * 0.42f, 0.95f * dp, fillP);
-                    break;
-                case IC_EYE_OFF:
-                    c.drawOval(cx - u, cy - u * 0.52f, cx + u, cy + u * 0.52f, p);
-                    c.drawLine(cx - u * 0.82f, cy + u * 0.82f, cx + u * 0.82f, cy - u * 0.82f, p);
-                    break;
-                case IC_TRASH:
-                    c.drawLine(cx - u * 0.85f, cy - u * 0.55f, cx + u * 0.85f, cy - u * 0.55f, p);
-                    c.drawLine(cx - u * 0.35f, cy - u * 0.85f, cx + u * 0.35f, cy - u * 0.85f, p);
-                    r.set(cx - u * 0.62f, cy - u * 0.55f, cx + u * 0.62f, cy + u * 0.88f);
-                    c.drawRoundRect(r, 1.8f * dp, 1.8f * dp, p);
-                    break;
-                case IC_FOLDER:
-                    path.reset();
-                    path.moveTo(cx - u, cy - u * 0.65f);
-                    path.lineTo(cx - u * 0.18f, cy - u * 0.65f);
-                    path.lineTo(cx + u * 0.06f, cy - u * 0.32f);
-                    path.lineTo(cx + u, cy - u * 0.32f);
-                    path.lineTo(cx + u, cy + u * 0.72f);
-                    path.lineTo(cx - u, cy + u * 0.72f);
-                    path.close();
-                    c.drawPath(path, p);
-                    break;
-                case IC_LAYERS:
-                    path.reset();
-                    path.moveTo(cx, cy - u * 0.82f);
-                    path.lineTo(cx + u * 0.95f, cy - u * 0.25f);
-                    path.lineTo(cx, cy + u * 0.30f);
-                    path.lineTo(cx - u * 0.95f, cy - u * 0.25f);
-                    path.close();
-                    c.drawPath(path, p);
-                    c.drawLine(cx - u * 0.88f, cy + u * 0.28f, cx, cy + u * 0.80f, p);
-                    c.drawLine(cx, cy + u * 0.80f, cx + u * 0.88f, cy + u * 0.28f, p);
-                    break;
-                case IC_BELL:
-                    r.set(cx - u * 0.7f, cy - u * 0.8f, cx + u * 0.7f, cy + u * 0.52f);
-                    c.drawArc(r, 180, 180, false, p);
-                    c.drawLine(cx - u * 0.7f, cy - u * 0.14f, cx - u * 0.7f, cy + u * 0.50f, p);
-                    c.drawLine(cx + u * 0.7f, cy - u * 0.14f, cx + u * 0.7f, cy + u * 0.50f, p);
-                    c.drawLine(cx - u * 0.92f, cy + u * 0.50f, cx + u * 0.92f, cy + u * 0.50f, p);
-                    c.drawLine(cx - u * 0.22f, cy + u * 0.84f, cx + u * 0.22f, cy + u * 0.84f, p);
-                    break;
-                case IC_SHORTCUT:
-                    path.reset();
-                    path.moveTo(cx + u * 0.12f, cy - u * 0.92f);
-                    path.lineTo(cx - u * 0.68f, cy + u * 0.08f);
-                    path.lineTo(cx + u * 0.05f, cy + u * 0.08f);
-                    path.lineTo(cx - u * 0.12f, cy + u * 0.92f);
-                    path.lineTo(cx + u * 0.68f, cy - u * 0.08f);
-                    path.lineTo(cx - u * 0.05f, cy - u * 0.08f);
-                    path.close();
-                    c.drawPath(path, p);
-                    break;
-                case IC_SORT:
-                    c.drawLine(cx - u * 0.9f, cy - u * 0.55f, cx + u * 0.9f, cy - u * 0.55f, p);
-                    c.drawLine(cx - u * 0.9f, cy, cx + u * 0.55f, cy, p);
-                    c.drawLine(cx - u * 0.9f, cy + u * 0.55f, cx + u * 0.2f, cy + u * 0.55f, p);
-                    break;
-                case IC_CLOSE:
-                default:
-                    c.drawLine(cx - u * 0.65f, cy - u * 0.65f, cx + u * 0.65f, cy + u * 0.65f, p);
-                    c.drawLine(cx + u * 0.65f, cy - u * 0.65f, cx - u * 0.65f, cy + u * 0.65f, p);
-                    break;
-            }
-        }
     }
 }

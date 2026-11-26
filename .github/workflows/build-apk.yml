@@ -39,7 +39,7 @@ jobs:
           AJ="$ANDROID_HOME/platforms/android-34/android.jar"
 
           VERSION_NAME=$(grep -oP 'android:versionName="\K[^"]+' AndroidManifest.xml | head -n 1)
-          VERSION_NAME="${VERSION_NAME:-2.8.0}"
+          VERSION_NAME="${VERSION_NAME:-2.9.0}"
           echo "VERSION_NAME=${VERSION_NAME}" >> "$GITHUB_ENV"
 
           build_variant() {
