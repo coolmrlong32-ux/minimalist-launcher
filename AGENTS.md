@@ -1,8 +1,8 @@
-# 极简桌面 (Minimalist Launcher · v2.8.0) — AI Agent 开发与构建规范
+# 极简桌面 (Minimalist Launcher · v2.9.0) — AI Agent 开发与构建规范
 
 ## 1. 项目概览
 - **仓库名称**: `极简桌面`
-- **当前版本**: `v2.8.0` (`versionCode: 280`)
+- **当前版本**: `v2.9.0` (`versionCode: 290`)
 - **技术栈**: 纯原生 Android Java (JDK 17 编译目标 `--release 8`，`minSdkVersion 26`，`targetSdkVersion 34`)，**无 Gradle 依赖**，直接通过 Android Build Tools (`aapt` + `javac` + `d8` + `zipalign` + `apksigner`) 毫秒级打包。
 - **核心设计哲学**: 极简零冗余、单手拇指人体工学、流体字母波浪检索、原生弹出式文件夹与通知胶囊。
 
@@ -14,6 +14,8 @@
   - `MainActivity.java`: 主桌面容器、一体流列表适配器 (`StreamAdapter`)、动态未读通知浮现、搜索与快捷计算引擎调用。
   - `NiagaraHeaderView.java`: 融入 ListView 一体流顶部一览组件（3 种时钟排版、农历/天气/智能电量、矢量日程/便签/极简媒体条、微件托管与单手留白）。
   - `PopupCardController.java`: 统一锚点 Pop-up 浮层控制器（App Pop-up 关联子应用集合、文件夹 Pop-up、通知与内联快捷回复、矢量工具条与背景模糊）。
+  - `AppPickerSheet.java`: 统一底部多选器与拖拽排序弹窗组件（吸顶标题/搜索/字母筛选 + 82% 最大高度限制）。
+  - `VectorGlyphView.java`: 全桌面统一线性矢量图标渲染视图。
   - `NiagaraWaveView.java`: 自适应字母流体波浪导轨、左手镜像展开与动态系统手势排除区。
   - `NiagaraCoinButton.java`: 悬浮灵动圆钮（搜索过渡渐隐、四向手势与长按控制中心）。
   - `SettingsSheetController.java`: 分组卡片式控制中心与后台保活/权限体检中心。

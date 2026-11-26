@@ -20,7 +20,7 @@ import java.util.Locale;
 final class LunarStatusEngine {
 
     static final class DeviceMetrics {
-        String greeting = "☀️ 你好";
+        String greeting = "你好";
         String lunarLine = "";
         int batteryPct = 80;
         boolean charging = false;
@@ -58,9 +58,6 @@ final class LunarStatusEngine {
         0x0d520
     };
 
-    private static final String[] TIANGAN = {"甲", "乙", "丙", "丁", "戊", "己", "庚", "辛", "壬", "癸"};
-    private static final String[] DIZHI = {"子", "丑", "寅", "卯", "辰", "巳", "午", "未", "申", "酉", "戌", "亥"};
-    private static final String[] ZODIAC = {"鼠", "牛", "虎", "兔", "龙", "蛇", "马", "羊", "猴", "鸡", "狗", "猪"};
     private static final String[] LUNAR_MONTHS = {"正", "二", "三", "四", "五", "六", "七", "八", "九", "十", "冬", "腊"};
     private static final String[] LUNAR_DAYS = {
         "初一", "初二", "初三", "初四", "初五", "初六", "初七", "初八", "初九", "初十",
@@ -84,13 +81,13 @@ final class LunarStatusEngine {
 
     static String greetingByHour() {
         int h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
-        if (h < 5) return "🌙 夜深了";
-        if (h < 9) return "🌅 早安";
-        if (h < 12) return "☀️ 上午好";
-        if (h < 14) return "🍵 午安";
-        if (h < 18) return "🌤 下午好";
-        if (h < 22) return "🌆 晚上好";
-        return "✨ 夜安";
+        if (h < 5) return "夜深了";
+        if (h < 9) return "早安";
+        if (h < 12) return "上午好";
+        if (h < 14) return "午安";
+        if (h < 18) return "下午好";
+        if (h < 22) return "晚上好";
+        return "夜安";
     }
 
     private static int leapMonth(int y) {
@@ -241,23 +238,5 @@ final class LunarStatusEngine {
         cachedMetrics = dm;
         lastReadMetricsMs = now;
         return dm;
-    }
-
-    static String getHeaderStatusLine(Context ctx) {
-        DeviceMetrics dm = readMetrics(ctx);
-        String icon = dm.charging ? "⚡" : (dm.batteryPct >= 25 ? "🔋" : "🪫");
-        String lunar = (dm.lunarLine != null && !dm.lunarLine.isEmpty() && !dm.lunarLine.equals(dm.greeting))
-                ? dm.lunarLine : "清风徐来";
-        return String.format(Locale.ROOT, "%s · %s  |  %s %d%% (%.1f°C)  |  ⚡ 运存 %.1fG 空闲",
-                dm.greeting, lunar, icon, dm.batteryPct, dm.batteryTempC, dm.ramAvailGb);
-    }
-
-    static String getDetailedDeviceReport(Context ctx, int totalApps, int favCount, int todayLaunches) {
-        DeviceMetrics dm = readMetrics(ctx);
-        return "📅 历法：" + dm.lunarLine + "\n"
-                + String.format(Locale.ROOT, "🔋 电池：%d%% · %.1f°C · %d mV\n", dm.batteryPct, dm.batteryTempC, dm.batteryVoltMv)
-                + String.format(Locale.ROOT, "🧠 运存：可用 %.1f GB / 共 %.1f GB (%d%%)\n", dm.ramAvailGb, dm.ramTotalGb, dm.ramUsedPct)
-                + String.format(Locale.ROOT, "💾 存储：剩余 %.1f GB / 共 %.1f GB\n", dm.storageFreeGb, dm.storageTotalGb)
-                + "📱 统计：共 " + totalApps + " 个应用 · 常用 " + favCount + " 个 · 启动 " + todayLaunches + " 次";
     }
 }

@@ -95,10 +95,6 @@ final class NiagaraCoinButton extends View {
         }
     }
 
-    void setSearchProgress(float progress) {
-        applySearchTransition(progress);
-    }
-
     /** 随搜索过渡进度 0→1 执行柔和缩放 (1.0→0.72)、渐隐 (1.0→0.0) 与微下沉，避免同步 GONE 导致闪烁。 */
     void applySearchTransition(float progress) {
         float p = Math.max(0f, Math.min(1f, progress));

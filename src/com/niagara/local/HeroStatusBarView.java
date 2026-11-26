@@ -55,13 +55,16 @@ final class HeroStatusBarView extends LinearLayout {
     private final View gap2;
     private final TextView extraLabel;
 
-    /** 默认：无分割线留白排版（次级文本半透明、Medium 字重）。 */
-    static final int STYLE_AIRY = 0;
-    /** 高对比度排版：次级文本接近全不透明、粗体强调。 */
-    static final int STYLE_HIGH_CONTRAST = 1;
+    static final int MODE_SMART = 0;
+    static final int MODE_ALWAYS_BATTERY = 1;
+    static final int MODE_FULL = 2;
+    static final String[] STATUS_MODE_NAMES = {
+            "极简按需（充电/低电显电量）",
+            "常显电量（天气 + 电量）",
+            "完整监控（含温度与运存）"
+    };
     private static final float GAP_DP = 8f;
 
-    private int aestheticStyle = STYLE_AIRY;
     private String lastWeatherRaw = "";
     private boolean fullMode = false;
     private boolean smartBatteryOnly = true;
@@ -70,13 +73,12 @@ final class HeroStatusBarView extends LinearLayout {
     private float lastBatteryTempC = 32.0f;
     private double lastRamAvailGb = 4.0;
 
-    HeroStatusBarView(Context ctx, AuroraTheme theme, Typeface typeface, float textScale, boolean fullMode, final Callbacks cb) {
+    HeroStatusBarView(Context ctx, AuroraTheme theme, Typeface typeface, float textScale, int statusMode, final Callbacks cb) {
         super(ctx);
         this.dp = ctx.getResources().getDisplayMetrics().density;
         this.theme = theme;
         this.typeface = typeface;
         this.textScale = textScale;
-        this.fullMode = fullMode;
 
         setOrientation(HORIZONTAL);
         setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
@@ -124,56 +126,35 @@ final class HeroStatusBarView extends LinearLayout {
         extraSeg.addView(extraLabel, new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         addView(extraSeg, new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(28)));
 
-        applyExtraVisibility();
+        setStatusBarMode(statusMode);
         applyLabelColors();
         updateWeather("");
         updateMetrics(80, false, 32.0f, 4.0);
     }
 
-    /** 切换极简留白排版（STYLE_AIRY）/ 高对比度排版（STYLE_HIGH_CONTRAST）。 */
-    void setAestheticStyle(int styleMode) {
-        int m = styleMode == STYLE_HIGH_CONTRAST ? STYLE_HIGH_CONTRAST : STYLE_AIRY;
-        if (m == aestheticStyle) return;
-        aestheticStyle = m;
-        applyLabelColors();
-        updateWeather(lastWeatherRaw);
-        renderMetricsText();
-    }
-
-    /** 随搜索框拉起平滑淡出：alpha = 1 - progress；完全淡出后置为 INVISIBLE（保持布局不跳动并禁用点击）。 */
-    void applySearchFadeProgress(float progress) {
-        float p = Math.max(0f, Math.min(1f, progress));
-        setAlpha(1f - p);
-        setTranslationY(-6f * dp * p);
-        int vis = p >= 0.999f ? View.INVISIBLE : View.VISIBLE;
-        if (getVisibility() != vis) setVisibility(vis);
+    private boolean isHighContrastNeeded() {
+        return theme.useSystemWallpaper;
     }
 
     private void applyLabelColors() {
-        boolean hc = aestheticStyle == STYLE_HIGH_CONTRAST;
-        int primary = theme.isLight ? (hc ? 0xE6141824 : 0xB8141824) : (hc ? 0xF2F8FAFC : 0xCCF1F5F9);
-        int secondary = theme.isLight ? (hc ? 0xB8141824 : 0x8C141824) : (hc ? 0xD9E2E8F0 : 0x9EE2E8F0);
+        boolean hc = isHighContrastNeeded();
+        int primary = theme.isLight ? (hc ? 0xE6141824 : 0xBD141824) : (hc ? 0xF2F8FAFC : 0xD2F1F5F9);
+        int secondary = theme.isLight ? (hc ? 0xB8141824 : 0x8F141824) : (hc ? 0xD9E2E8F0 : 0xA2E2E8F0);
         weatherLabel.setTextColor(primary);
         batteryLabel.setTextColor(primary);
         extraLabel.setTextColor(secondary);
     }
 
     private Object weightSpan() {
-        return aestheticStyle == STYLE_HIGH_CONTRAST ? new StyleSpan(Typeface.BOLD) : new TypefaceSpan("sans-serif-medium");
+        return isHighContrastNeeded() ? new StyleSpan(Typeface.BOLD) : new TypefaceSpan("sans-serif-medium");
     }
 
-    void setFullMode(boolean full) {
-        if (this.fullMode == full) return;
-        this.fullMode = full;
+    void setStatusBarMode(int mode) {
+        int clamped = Math.max(MODE_SMART, Math.min(MODE_FULL, mode));
+        this.smartBatteryOnly = (clamped == MODE_SMART);
+        this.fullMode = (clamped == MODE_FULL);
         applyExtraVisibility();
         renderMetricsText();
-    }
-
-    /** 原生 Niagara 按需电量：仅在充电或电量 ≤20% 时展示电池段（完整模式开启时始终展示）。 */
-    void setSmartBatteryOnly(boolean smartOnly) {
-        if (this.smartBatteryOnly == smartOnly) return;
-        this.smartBatteryOnly = smartOnly;
-        applyExtraVisibility();
     }
 
     void setCentered(boolean centered) {

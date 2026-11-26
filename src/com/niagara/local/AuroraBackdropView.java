@@ -62,12 +62,10 @@ final class AuroraBackdropView extends View {
     private static final float SEARCH_BASE_SCALE = 1.045f;
     private static final float SEARCH_MAX_DIM = 0.35f;
     private final long t0 = SystemClock.uptimeMillis();
-    private long resumeFreezeUntilMs = 0L;
     private int cachedSolarPhase = WeatherSyncEngine.SOLAR_DAY;
     private long lastPhaseCheckMs = 0L;
     private final Runnable frameTick = this::postInvalidateOnAnimation;
 
-    private static volatile Bitmap cachedWall;
     private static volatile Boolean cachedBright;
     private static volatile Integer cachedTopColor;
     private static volatile Integer cachedBotColor;
@@ -107,9 +105,6 @@ final class AuroraBackdropView extends View {
     void updateAnimateFlow(boolean flow) {
         this.animateFlow = flow;
         removeCallbacks(frameTick);
-        if (visible && animateFlow && theme != null && !theme.useSystemWallpaper && unitOrbShaders != null) {
-            postDelayed(frameTick, 120L);
-        }
         invalidate();
     }
 
@@ -147,11 +142,11 @@ final class AuroraBackdropView extends View {
 
     void setScreenVisible(boolean v) {
         this.visible = v;
-        if (v) this.lastPhaseCheckMs = 0L;
-        removeCallbacks(frameTick);
-        if (v && animateFlow && theme != null && !theme.useSystemWallpaper && unitOrbShaders != null) {
-            resumeFreezeUntilMs = SystemClock.uptimeMillis() + 900L;
-            postDelayed(frameTick, 920L);
+        if (v) {
+            this.lastPhaseCheckMs = 0L;
+            invalidate();
+        } else {
+            removeCallbacks(frameTick);
         }
     }
 
@@ -295,15 +290,10 @@ final class AuroraBackdropView extends View {
             orbPaint.setAlpha(255);
         }
 
-        if (visible && animateFlow && !theme.useSystemWallpaper && unitOrbShaders != null) {
-            long now = SystemClock.uptimeMillis();
-            if (touchGlowStrength > 0.02f) {
-                removeCallbacks(frameTick);
-                postDelayed(frameTick, 28L);
-            } else if (now >= resumeFreezeUntilMs) {
-                removeCallbacks(frameTick);
-                postDelayed(frameTick, 360L);
-            }
+        // 仅在触摸波浪交互期间按帧刷新光晕，待机静止时 0 后台唤醒
+        if (visible && animateFlow && !theme.useSystemWallpaper && unitOrbShaders != null && touchGlowStrength > 0.02f) {
+            removeCallbacks(frameTick);
+            postDelayed(frameTick, 28L);
         }
     }
 
@@ -316,7 +306,6 @@ final class AuroraBackdropView extends View {
         if (style < 0 || style > 5) style = 0;
         final int styleIdx = style;
         final int phase = AuroraTheme.resolveSolarPhase(ctx);
-        final boolean sysNight = (phase == WeatherSyncEngine.SOLAR_NIGHT);
         int lastPhase = prefs.getInt("wall_applied_phase_v3", -1);
         if (phase == lastPhase) return;
 
@@ -326,11 +315,7 @@ final class AuroraBackdropView extends View {
             try {
                 Bitmap bmp = renderAuroraWallpaper(appCtx, styleIdx);
                 saveAndApplySystemWallpaper(appCtx, bmp);
-                prefs.edit()
-                        .putInt("wall_applied_phase_v3", phase)
-                        .putInt("wall_applied_phase_v2", phase)
-                        .putBoolean("wall_applied_night", sysNight)
-                        .apply();
+                prefs.edit().putInt("wall_applied_phase_v3", phase).apply();
             } catch (Throwable ignored) {
             } finally {
                 syncingDayNightWall = false;
@@ -386,45 +371,6 @@ final class AuroraBackdropView extends View {
         return ctx.getSharedPreferences("niagara_local", Context.MODE_PRIVATE).getInt("wall_bot_color", fallback);
     }
 
-    static Bitmap getOrLoadWallpaper(Context ctx) {
-        Bitmap c = cachedWall;
-        if (c != null && !c.isRecycled()) return c;
-        File f = wallCacheFile(ctx);
-        if (f.exists()) {
-            try {
-                Bitmap b = BitmapFactory.decodeFile(f.getAbsolutePath());
-                if (b != null) {
-                    cachedWall = b;
-                    cachedBright = computeBright(b);
-                    cachedTopColor = computeRegionColor(b, 0.0f, 0.30f);
-                    cachedBotColor = computeRegionColor(b, 0.70f, 1.0f);
-                    return b;
-                }
-            } catch (Throwable ignored) {}
-        }
-        try {
-            Drawable d = WallpaperManager.getInstance(ctx).getDrawable();
-            if (d instanceof BitmapDrawable) {
-                Bitmap b = ((BitmapDrawable) d).getBitmap();
-                if (b != null && !b.isRecycled()) {
-                    cachedWall = b;
-                    cachedBright = computeBright(b);
-                    cachedTopColor = computeRegionColor(b, 0.0f, 0.30f);
-                    cachedBotColor = computeRegionColor(b, 0.70f, 1.0f);
-                    final Bitmap toSave = b;
-                    final Context appCtx = ctx.getApplicationContext();
-                    AppExecutors.getInstance().diskIO().execute(() -> saveWallpaperCache(appCtx, toSave));
-                    return b;
-                }
-            }
-        } catch (Throwable ignored) {}
-
-        Bitmap fallback = renderAuroraWallpaper(ctx, 0);
-        cachedWall = fallback;
-        cachedBright = computeBright(fallback);
-        return fallback;
-    }
-
     static void saveAndApplySystemWallpaper(Context ctx, Bitmap bmp) throws Exception {
         saveWallpaperCache(ctx, bmp);
         WallpaperManager wm = WallpaperManager.getInstance(ctx);
@@ -442,7 +388,6 @@ final class AuroraBackdropView extends View {
 
     private static void saveWallpaperCache(Context ctx, Bitmap bmp) {
         if (bmp == null || bmp.isRecycled()) return;
-        cachedWall = bmp;
         boolean bright = computeBright(bmp);
         int topCol = computeRegionColor(bmp, 0.0f, 0.30f);
         int botCol = computeRegionColor(bmp, 0.70f, 1.0f);
