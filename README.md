@@ -16,5 +16,5 @@
 - **纯原生零依赖极速编译**：不依赖重型 Gradle 缓存，通过 `build.ps1`（Windows）、`build.sh`（Linux）或 GitHub Actions 直接调用 `aapt` + `javac` + `d8` 输出双包名签名 APK（单包 `< 300 KB`）。
 
 ## 云端与本地构建
-- **云端自动打包（免费）**：每次推送代码至 `main` 分支、提交 Pull Request 或手动触发 `Actions -> Build Android APK`，GitHub Actions 将自动编译并生成 `极简桌面-v2.8.0.apk` 与 `极简桌面-v2.8.0-direct.apk` 供直接下载。
+- **云端自动打包与发布 Release（公开仓库免费）**：每次推送或合并更新了版本号的代码至 `main` 分支，或推送 `v*` 标签（如 `v2.8.0`），GitHub Actions 将自动编译并同步创建 **GitHub Release**（附带 `极简桌面-v${versionName}.apk` 与 `极简桌面-v${versionName}-direct.apk` 双安装包）；PR 与手动触发也会生成 Actions 产物。
 - **AI Agent 协作**：仓库内置 `AGENTS.md` 架构与构建指南，其他 AI Agent 接入仓库后可直接读取完整源码结构并完成修改与验证。
