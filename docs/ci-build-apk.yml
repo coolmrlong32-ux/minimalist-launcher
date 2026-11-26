@@ -3,9 +3,18 @@ name: Build Android APK
 on:
   push:
     branches: [ main ]
+    tags: [ 'v*' ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: '是否同步发布 GitHub Release（基于当前 AndroidManifest.xml 版本号）'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -29,6 +38,10 @@ jobs:
           BT="$ANDROID_HOME/build-tools/34.0.0"
           AJ="$ANDROID_HOME/platforms/android-34/android.jar"
 
+          VERSION_NAME=$(grep -oP 'android:versionName="\K[^"]+' AndroidManifest.xml | head -n 1)
+          VERSION_NAME="${VERSION_NAME:-2.8.0}"
+          echo "VERSION_NAME=${VERSION_NAME}" >> "$GITHUB_ENV"
+
           build_variant() {
             local PKG="$1"
             local OUT_APK="$2"
@@ -48,11 +61,51 @@ jobs:
             mkdir -p dist && cp "build/$OUT_APK" "dist/$OUT_APK"
           }
 
-          build_variant "com.niagara.loca2" "极简桌面-v2.8.0-direct.apk"
-          build_variant "com.niagara.local" "极简桌面-v2.8.0.apk"
+          build_variant "com.niagara.loca2" "极简桌面-v${VERSION_NAME}-direct.apk"
+          build_variant "com.niagara.local" "极简桌面-v${VERSION_NAME}.apk"
 
       - name: Upload Built APKs
         uses: actions/upload-artifact@v4
         with:
-          name: 极简桌面-v2.8.0-APKs
+          name: 极简桌面-v${{ env.VERSION_NAME }}-APKs
           path: dist/*.apk
+
+      - name: Publish GitHub Release
+        if: >-
+          (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))
+          || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            TAG="${GITHUB_REF_NAME}"
+          else
+            TAG="v${VERSION_NAME}"
+          fi
+
+          mkdir -p build/release-assets
+          MAIN_ASSET="build/release-assets/Minimalist-Launcher-v${VERSION_NAME}.apk"
+          DIRECT_ASSET="build/release-assets/Minimalist-Launcher-v${VERSION_NAME}-direct.apk"
+          cp "dist/极简桌面-v${VERSION_NAME}.apk" "$MAIN_ASSET"
+          cp "dist/极简桌面-v${VERSION_NAME}-direct.apk" "$DIRECT_ASSET"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            if [[ "$GITHUB_REF" == refs/tags/v* ]] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+              gh release upload "$TAG" \
+                "${MAIN_ASSET}#极简桌面-v${VERSION_NAME}.apk" \
+                "${DIRECT_ASSET}#极简桌面-v${VERSION_NAME}-direct.apk" \
+                --clobber
+            else
+              echo "Release ${TAG} already exists on main push; skipping duplicate release creation."
+            fi
+          else
+            NOTES=$(printf '## 安装包说明（双包名共存）\n- `极简桌面-v%s.apk`（下载文件名 `Minimalist-Launcher-v%s.apk`）：主版本，包名 `com.niagara.local`，可直接覆盖升级旧版本。\n- `极简桌面-v%s-direct.apk`（下载文件名 `Minimalist-Launcher-v%s-direct.apk`）：双开共存版本，包名 `com.niagara.loca2`。' "$VERSION_NAME" "$VERSION_NAME" "$VERSION_NAME" "$VERSION_NAME")
+            gh release create "$TAG" \
+              --target "$GITHUB_SHA" \
+              --title "极简桌面 ${TAG} 正式版" \
+              --notes "$NOTES" \
+              --generate-notes \
+              "${MAIN_ASSET}#极简桌面-v${VERSION_NAME}.apk" \
+              "${DIRECT_ASSET}#极简桌面-v${VERSION_NAME}-direct.apk"
+          fi
