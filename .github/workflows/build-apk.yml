@@ -48,11 +48,11 @@ jobs:
             mkdir -p dist && cp "build/$OUT_APK" "dist/$OUT_APK"
           }
 
-          build_variant "com.niagara.loca2" "极简桌面-v2.7.0-direct.apk"
-          build_variant "com.niagara.local" "极简桌面-v2.7.0.apk"
+          build_variant "com.niagara.loca2" "极简桌面-v2.8.0-direct.apk"
+          build_variant "com.niagara.local" "极简桌面-v2.8.0.apk"
 
       - name: Upload Built APKs
         uses: actions/upload-artifact@v4
         with:
-          name: 极简桌面-v2.7.0-APKs
+          name: 极简桌面-v2.8.0-APKs
           path: dist/*.apk

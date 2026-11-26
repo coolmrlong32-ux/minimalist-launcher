@@ -44,7 +44,8 @@ final class NiagaraCoinButton extends View {
     private float downX, downY;
     private boolean pressedState = false;
     private boolean gestureTriggered = false;
-    /** 搜索过渡进度 0..1：圆环随搜索呼出渐变为强调色并略微加粗，与壁纸景深/键盘升起同步。 */
+    private boolean userHidden = false;
+    /** 搜索过渡进度 0..1：按钮柔和缩小、微下沉并渐隐淡出，与壁纸景深/搜索框呼出完全同步。 */
     private float searchProgress = 0f;
 
     private final Runnable longPressTask = new Runnable() {
@@ -68,7 +69,7 @@ final class NiagaraCoinButton extends View {
         iconPaint.setStrokeCap(Paint.Cap.ROUND);
         iconPaint.setStrokeJoin(Paint.Join.ROUND);
         fillPaint.setStyle(Paint.Style.FILL);
-        setElevation(6f * dp);
+        setElevation(4.5f * dp);
     }
 
     void bindTheme(AuroraTheme theme) {
@@ -83,10 +84,43 @@ final class NiagaraCoinButton extends View {
         this.cachedBgShader = null;
     }
 
+    void setUserHidden(boolean hidden) {
+        this.userHidden = hidden;
+        if (hidden) {
+            setVisibility(View.GONE);
+            setClickable(false);
+            setEnabled(false);
+        } else {
+            applySearchTransition(searchProgress);
+        }
+    }
+
     void setSearchProgress(float progress) {
+        applySearchTransition(progress);
+    }
+
+    /** 随搜索过渡进度 0→1 执行柔和缩放 (1.0→0.72)、渐隐 (1.0→0.0) 与微下沉，避免同步 GONE 导致闪烁。 */
+    void applySearchTransition(float progress) {
         float p = Math.max(0f, Math.min(1f, progress));
-        if (Math.abs(p - searchProgress) < 0.002f) return;
         searchProgress = p;
+        if (userHidden) {
+            if (getVisibility() != View.GONE) setVisibility(View.GONE);
+            return;
+        }
+        if (p > 0.001f) {
+            animate().cancel();
+            setTranslationX(0f);
+        }
+        float s = 1f - 0.28f * p;
+        setScaleX(s);
+        setScaleY(s);
+        setAlpha(1f - p);
+        setTranslationY(10f * dp * p);
+        boolean hidden = p >= 0.99f;
+        int targetVis = hidden ? View.INVISIBLE : View.VISIBLE;
+        if (getVisibility() != targetVis) setVisibility(targetVis);
+        setClickable(!hidden);
+        setEnabled(!hidden);
         invalidate();
     }
 
@@ -118,24 +152,24 @@ final class NiagaraCoinButton extends View {
         bgPaint.setShader(cachedBgShader);
         canvas.drawCircle(cx, cy, r, bgPaint);
 
-        ringPaint.setStrokeWidth((1.0f + 0.8f * searchProgress) * dp);
+        ringPaint.setStrokeWidth((0.85f + 0.55f * searchProgress) * dp);
         ringPaint.setColor(blendColor(theme.coinButtonRingColor(), theme.accent, searchProgress));
         canvas.drawCircle(cx, cy, r - 0.5f * dp, ringPaint);
 
         if (iconMode == ICON_SEARCH) {
-            float glassR = 6.8f * dp;
-            float gx = cx - 1.5f * dp;
-            float gy = cy - 1.5f * dp;
+            float glassR = 6.6f * dp;
+            float gx = cx - 1.4f * dp;
+            float gy = cy - 1.4f * dp;
             fillPaint.setColor(theme.accent);
-            fillPaint.setAlpha(theme.isLight ? 36 : 64);
+            fillPaint.setAlpha(theme.isLight ? 24 : 46);
             canvas.drawCircle(gx, gy, glassR, fillPaint);
 
-            iconPaint.setAlpha(245);
-            iconPaint.setStrokeWidth(1.9f * dp);
+            iconPaint.setAlpha(242);
+            iconPaint.setStrokeWidth(1.85f * dp);
             iconPaint.setColor(theme.textPrimary);
             canvas.drawCircle(gx, gy, glassR, iconPaint);
             float handleStart = glassR * 0.72f;
-            canvas.drawLine(gx + handleStart, gy + handleStart, cx + 7.5f * dp, cy + 7.5f * dp, iconPaint);
+            canvas.drawLine(gx + handleStart, gy + handleStart, cx + 7.2f * dp, cy + 7.2f * dp, iconPaint);
             return;
         }
 

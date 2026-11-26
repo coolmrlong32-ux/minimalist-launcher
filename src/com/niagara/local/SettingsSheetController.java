@@ -60,6 +60,8 @@ final class SettingsSheetController {
         String getCurrentFontName();
         String getCurrentDensityName();
         String getCurrentCoinActionName();
+        String getCurrentClockStyleName();
+        String getCurrentSearchEngineName();
         int getPinnedWidgetCount();
         void showDeviceStatus();
         void showPickFavorites();
@@ -75,16 +77,21 @@ final class SettingsSheetController {
         void showFontPicker();
         void onTextScaleChanged(float scale);
         void onUse24HChanged(boolean use24h);
+        void showClockStylePicker();
+        void onSmartBatteryChanged(boolean smartOnly);
         void onStatusBarFullChanged(boolean full);
         void onHeroHighContrastChanged(boolean highContrast);
         void onFavCardsChanged(boolean on);
         void onOneHandGravityChanged(boolean on);
+        void onSurfaceUnreadHomeChanged(boolean on);
         void onShowMediaChanged(boolean on);
         void onShowAgendaChanged(boolean on);
         void openWidgetManager();
         void showDensityPicker();
         void onPullDownSearchChanged(boolean on);
         void onWaveIdleDotsChanged(boolean dots);
+        void onWaveAdaptiveAlphaChanged(boolean adaptive);
+        void showSearchEnginePicker();
         void onCoinLeftChanged(boolean left);
         void showCoinActionPicker();
         void onPullLaunchChanged(boolean on);
@@ -125,6 +132,7 @@ final class SettingsSheetController {
     private static final int IC_FOLDER = 18;
     private static final int IC_EYE_OFF = 19;
     private static final int IC_BACKUP = 20;
+    private static final int IC_SEARCH = 21;
 
     static Dialog show(final Host host) {
         final Context ctx = host.getContext();
@@ -171,13 +179,13 @@ final class SettingsSheetController {
 
         LinearLayout titleCol = new LinearLayout(ctx);
         titleCol.setOrientation(LinearLayout.VERTICAL);
-        String verName = "2.7.0";
+        String verName = "2.8.0";
         try {
             String vn = ctx.getPackageManager().getPackageInfo(ctx.getPackageName(), 0).versionName;
             if (vn != null && !vn.isEmpty()) verName = vn;
         } catch (Throwable ignored) {}
         TextView titleTv = makeText(ctx, tf, host.sp(19f), theme.textPrimary, true, "流光桌面设置");
-        TextView subTv = makeText(ctx, tf, host.sp(11.5f), theme.textSecondary, false, "v" + verName + " · 原生 Niagara 极简体验版");
+        TextView subTv = makeText(ctx, tf, host.sp(11.5f), theme.textSecondary, false, "v" + verName + " · 原生 Niagara 深度体验版");
         subTv.setPadding(0, Math.round(2 * dp), 0, 0);
         titleCol.addView(titleTv);
         titleCol.addView(subTv);
@@ -326,6 +334,13 @@ final class SettingsSheetController {
         addSwitchRow(ctx, tf, host, theme, dp, gAppearance, IC_CLOCK, "24 小时制时钟", "关闭则显示 12 小时制",
                 prefs.getBoolean("use_24h", true), host::onUse24HChanged);
 
+        addDivider(ctx, theme, dp, gAppearance);
+        addActionRow(ctx, tf, host, theme, dp, gAppearance, IC_CLOCK, "时钟排版风格", "经典纤巧 / 现代圆润 / 极简居中",
+                host.getCurrentClockStyleName(), () -> {
+            dlg.dismiss();
+            host.showClockStylePicker();
+        });
+
         content.addView(gAppearance);
 
         // ==================== 分组 2：首页与常用 ====================
@@ -345,12 +360,20 @@ final class SettingsSheetController {
         });
 
         addDivider(ctx, theme, dp, gHome);
-        addSwitchRow(ctx, tf, host, theme, dp, gHome, IC_BATTERY, "状态栏显示温度与运存", "默认极简（仅天气与电量），开启后追加温度与可用内存",
+        addSwitchRow(ctx, tf, host, theme, dp, gHome, IC_BATTERY, "智能按需显示电量", "原生极简：仅充电或低电（≤20%）时浮现，关闭则常显",
+                prefs.getBoolean("smart_battery_only_v1", true), host::onSmartBatteryChanged);
+
+        addDivider(ctx, theme, dp, gHome);
+        addSwitchRow(ctx, tf, host, theme, dp, gHome, IC_BATTERY, "状态栏显示温度与运存", "默认极简，开启后追加电池温度与可用内存",
                 prefs.getBoolean("status_bar_full_v1", false), host::onStatusBarFullChanged);
 
         addDivider(ctx, theme, dp, gHome);
         addSwitchRow(ctx, tf, host, theme, dp, gHome, IC_SUN, "状态栏高对比度排版", "增强浅色或复杂壁纸下天气、电量的文字清晰度",
                 prefs.getBoolean("hero_high_contrast_v1", false), host::onHeroHighContrastChanged);
+
+        addDivider(ctx, theme, dp, gHome);
+        addSwitchRow(ctx, tf, host, theme, dp, gHome, IC_BELL, "首页动态浮现未读通知应用", "非首页应用来消息时临时呈现在首页，清除即隐退",
+                prefs.getBoolean("surface_unread_home_v1", true), host::onSurfaceUnreadHomeChanged);
 
         addDivider(ctx, theme, dp, gHome);
         addSwitchRow(ctx, tf, host, theme, dp, gHome, IC_CARD, "常用应用毛玻璃底衬", "为首页常用应用行添加柔光卡片背景",
@@ -361,7 +384,7 @@ final class SettingsSheetController {
                 prefs.getBoolean("one_hand_gravity_v1", true), host::onOneHandGravityChanged);
 
         addDivider(ctx, theme, dp, gHome);
-        addSwitchRow(ctx, tf, host, theme, dp, gHome, IC_SPARK, "顶部一览媒体控制卡", "播放音乐时自动浮现专辑封面与进度条",
+        addSwitchRow(ctx, tf, host, theme, dp, gHome, IC_SPARK, "顶部一览媒体控制条", "播放音乐时自动浮现极简专辑封面与 2dp 进度线",
                 prefs.getBoolean("show_media", true), host::onShowMediaChanged);
 
         addDivider(ctx, theme, dp, gHome);
@@ -369,7 +392,7 @@ final class SettingsSheetController {
                 prefs.getBoolean("show_agenda", false), host::onShowAgendaChanged);
 
         addDivider(ctx, theme, dp, gHome);
-        addActionRow(ctx, tf, host, theme, dp, gHome, IC_CARD, "桌面原生小组件 (Widgets)", "将系统天气、待办等微件贴到首页顶部",
+        addActionRow(ctx, tf, host, theme, dp, gHome, IC_CARD, "桌面原生小组件 (Widgets)", "将系统天气、待办等微件贴到首页顶部一体流",
                 "已贴 " + host.getPinnedWidgetCount() + " 个", () -> {
             dlg.dismiss();
             host.openWidgetManager();
@@ -394,6 +417,17 @@ final class SettingsSheetController {
         addDivider(ctx, theme, dp, gGesture);
         addSwitchRow(ctx, tf, host, theme, dp, gGesture, IC_SPARK, "字母导轨静默圆点模式", "原生 Niagara 风格：静止显示极简圆点，触碰展开流体字母",
                 prefs.getBoolean("wave_idle_dots_v1", true), host::onWaveIdleDotsChanged);
+
+        addDivider(ctx, theme, dp, gGesture);
+        addSwitchRow(ctx, tf, host, theme, dp, gGesture, IC_SPARK, "自适应字母导轨", "仅显示实际存在应用的首字母，关闭则显示完整 A-Z",
+                prefs.getBoolean("wave_adaptive_alpha_v1", true), host::onWaveAdaptiveAlphaChanged);
+
+        addDivider(ctx, theme, dp, gGesture);
+        addActionRow(ctx, tf, host, theme, dp, gGesture, IC_SEARCH, "默认网页搜索引擎", "极速搜索输入关键词后一键跳转网页搜索",
+                host.getCurrentSearchEngineName(), () -> {
+            dlg.dismiss();
+            host.showSearchEnginePicker();
+        });
 
         addDivider(ctx, theme, dp, gGesture);
         addActionRow(ctx, tf, host, theme, dp, gGesture, IC_GESTURE, "悬浮按钮轻点动作", "可切换为极速搜索、多任务后台、语音或隐藏",
@@ -928,6 +962,10 @@ final class SettingsSheetController {
                     c.drawLine(cx - u * 0.45f, cy, cx, cy + u * 0.45f, p);
                     c.drawLine(cx + u * 0.45f, cy, cx, cy + u * 0.45f, p);
                     c.drawLine(cx - u * 0.85f, cy + u * 0.85f, cx + u * 0.85f, cy + u * 0.85f, p);
+                    break;
+                case IC_SEARCH:
+                    c.drawCircle(cx - u * 0.18f, cy - u * 0.18f, u * 0.65f, p);
+                    c.drawLine(cx + u * 0.28f, cy + u * 0.28f, cx + u * 0.92f, cy + u * 0.92f, p);
                     break;
                 default:
                     c.drawCircle(cx, cy, u * 0.75f, p);

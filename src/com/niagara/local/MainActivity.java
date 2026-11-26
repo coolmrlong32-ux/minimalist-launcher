@@ -1,20 +1,23 @@
 package com.niagara.local;
 
 import android.Manifest;
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
+import android.animation.ValueAnimator;
 import android.app.Activity;
-import android.animation.ValueAnimator;import android.app.ActivityOptions;
-import android.app.AlertDialog;
-import android.app.Notification;
+import android.app.ActivityOptions;
 import android.app.Dialog;
 import android.app.KeyguardManager;
 import android.app.PendingIntent;
-import android.app.RemoteInput;
 import android.appwidget.AppWidgetProviderInfo;
+import android.content.BroadcastReceiver;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.ComponentName;
 import android.content.ContentUris;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.LauncherActivityInfo;
 import android.content.pm.LauncherApps;
@@ -25,7 +28,6 @@ import android.content.pm.ShortcutInfo;
 import android.content.res.Configuration;
 import android.database.Cursor;
 import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.ColorMatrix;
@@ -62,8 +64,12 @@ import android.provider.CalendarContract;
 import android.provider.Settings;
 import android.text.Editable;
 import android.text.InputType;
+import android.text.SpannableString;
+import android.text.Spanned;
 import android.text.TextUtils;
 import android.text.TextWatcher;
+import android.text.style.ForegroundColorSpan;
+import android.text.style.StyleSpan;
 import android.util.TypedValue;
 import android.view.GestureDetector;
 import android.view.Gravity;
@@ -74,6 +80,8 @@ import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.ViewGroup;
 import android.view.Window;
+import android.view.WindowInsets;
+import android.view.WindowInsetsAnimation;
 import android.view.WindowManager;
 import android.view.animation.PathInterpolator;
 import android.view.inputmethod.EditorInfo;
@@ -88,7 +96,6 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.ScrollView;
-import android.widget.TextClock;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -107,10 +114,10 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.HashSet;
-import java.util.LinkedHashSet;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -118,17 +125,17 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 流光桌面 · Niagara Local (v1.1.0 深度优化版)
+ * 极简桌面 · Minimalist Launcher (v2.8.0 原生 Niagara 深度改造版)
  *
- * 核心升级：
- * 1. 【左、右侧丝滑流体波浪导轨】右侧按参考视频还原「远端圆点 · + 近端柔美弧线字母 + 波峰深靛蓝圆球 + 触点光环」，
- *    采用 C² 连续余弦钟形包络 + 二阶弹簧阻尼 + 纵向弧长舒展补偿，彻底告别折角僵硬感；左侧继续保持无字母隐形触发；
- * 2. 【点按/滑动字母即时显示对应应用】无论是轻点还是滑动左/右侧边缘某字母，列表立即切换并精准定位到该字母开头的应用组，
- *    当前字母组高亮显示、其余字母组柔和变淡（松手后保持平滑高亮过渡）；
- * 3. 【桌面壁纸跟随系统白昼变化】默认主题自动响应系统深浅色模式 (UI_MODE_NIGHT) 与昼夜时段，白昼呈现视频同款清透晨曦丁香蓝紫柔雾，
- *    夜晚自动切换为深邃星云夜空（系统壁纸模式亦支持夜间自动柔暗护眼）；
- * 4. 【第一页常用应用栏深度优化】顶部时钟与日期常驻不跳动，第一页常用应用支持丝绒毛玻璃微卡片、高频 4 宫格灵动槽、
- *    内嵌通知/快捷方式直达及底部「✦ 编辑常用 · 全部应用」双胶囊栏。
+ * 核心特性：
+ * 1. 【首页一体流 Unified Stream】顶部时钟/日期农历天气/按需电量/矢量日程便签/无边框媒体条/原生小组件
+ *    作为 ListView HeaderView 融入首页滚动流，内容少时自动留白下沉至单手拇指区，内容多时整屏顺滑同滚；
+ * 2. 【自适应流体字母波浪】默认仅显示手机内实际存在应用的首字母，无大圆球遮挡纯字母涌出，指尖垂直对齐滚动，
+ *    且左边缘静默态零抢占系统侧滑返回手势；
+ * 3. 【原生统一 Pop-up 体系】支持 App Pop-up 关联子应用集合、右滑与长按视觉同源的线性矢量工具条、
+ *    文件夹点击/右滑/重命名/内部排序/直开首项切换，全面淘汰满屏 Emoji 大抽屉；
+ * 4. 【动态未读通知浮现与安全左滑】非首页应用来消息时自动临时呈现在首页，清除即隐退；左滑仅清通知绝不误删常用；
+ * 5. 【120Hz 紧贴键盘搜索】API 30+ WindowInsetsAnimation 逐帧跟随输入法，空态仅呈最近，命中字高亮，回车执行最佳项。
  */
 public class MainActivity extends Activity {
 
@@ -157,40 +164,34 @@ public class MainActivity extends Activity {
         static final int TYPE_FAV_APP = 1;
         static final int TYPE_ALL_APP = 2;
         static final int TYPE_CALC_RESULT = 3;
-        static final int TYPE_FAV_FOOTER = 4;
-        static final int TYPE_GROUP_ROW = 5;
-        static final int TYPE_FOLDER = 6;
-        static final int TYPE_SHORTCUT_RESULT = 7;
-        static final int TYPE_WEB_SEARCH = 8;
+        static final int TYPE_FOLDER = 4;
+        static final int TYPE_SHORTCUT_RESULT = 5;
+        static final int TYPE_WEB_SEARCH = 6;
+        static final int TYPE_SURFACED_DIVIDER = 7;
+        static final int VIEW_TYPE_COUNT = 8;
 
         final int type;
         final String text;
         final AppEntry app;
-        final List<AppEntry> groupApps;
         final int folderIdx;
         final ShortcutInfo shortcut;
 
         StreamRow(int type, String text, AppEntry app) {
-            this(type, text, app, null, -1, null);
-        }
-
-        StreamRow(int type, String text, AppEntry app, List<AppEntry> groupApps) {
-            this(type, text, app, groupApps, -1, null);
+            this(type, text, app, -1, null);
         }
 
         StreamRow(int type, String text, AppEntry app, int folderIdx) {
-            this(type, text, app, null, folderIdx, null);
+            this(type, text, app, folderIdx, null);
         }
 
         StreamRow(int type, String text, AppEntry app, ShortcutInfo shortcut) {
-            this(type, text, app, null, -1, shortcut);
+            this(type, text, app, -1, shortcut);
         }
 
-        StreamRow(int type, String text, AppEntry app, List<AppEntry> groupApps, int folderIdx, ShortcutInfo shortcut) {
+        StreamRow(int type, String text, AppEntry app, int folderIdx, ShortcutInfo shortcut) {
             this.type = type;
             this.text = text;
             this.app = app;
-            this.groupApps = groupApps;
             this.folderIdx = folderIdx;
             this.shortcut = shortcut;
         }
@@ -213,7 +214,7 @@ public class MainActivity extends Activity {
         }
     }
 
-    // 右侧显示 ★ 与 A-Z #（搜索统一由右下角放大镜圆钮或上滑触发，与视频完全一致）
+    // 完整字母序列（开启自适应字母导轨时按已安装应用动态精简）
     private static final String WAVE_SYMBOLS = "★ABCDEFGHIJKLMNOPQRSTUVWXYZ#";
     private static final String PREF_FILE = "niagara_local";
 
@@ -222,6 +223,7 @@ public class MainActivity extends Activity {
     private static final String K_HIDDEN = "hidden";
     private static final String K_ALIASES = "aliases";
     private static final String K_FOLDERS = "folders";
+    private static final String K_APP_POPUPS = "app_popups_v1";
     private static final String K_LAUNCH_COUNTS = "launch_counts";
     private static final String K_RECENT_KEYS = "recent_keys";
     private static final String K_STICKY_NOTE = "sticky_note";
@@ -230,10 +232,7 @@ public class MainActivity extends Activity {
     private static final String K_FLOW_ANIM = "flow_anim";
     private static final String K_ICON_SHAPE = "icon_shape";
     private static final String K_SHOW_ICONS = "show_icons";
-    private static final String K_SHOW_RECENT_BAR = "show_recent_bar";
     private static final String K_FAV_CARDS = "fav_cards_v2";
-    private static final String K_FAV_RAIL = "fav_rail_v1";
-    private static final String K_SHOW_GLANCE_CARD = "show_glance_card_v1";
     private static final String K_PULL_DOWN_SEARCH = "pull_down_search_v1";
     private static final String K_COIN_LEFT = "coin_left_v1";
     private static final String K_WALL_STYLE_IDX = "wall_style_idx";
@@ -242,9 +241,12 @@ public class MainActivity extends Activity {
     private static final String K_TEXT_SCALE = "text_scale";
     private static final String K_ROW_DENSITY = "row_density";
     private static final String K_USE_24H = "use_24h";
+    private static final String K_CLOCK_STYLE = "clock_style_v1";
     private static final String K_AUTO_HIDE_WAVE = "auto_hide_wave";
+    private static final String K_WAVE_ADAPTIVE_ALPHA = "wave_adaptive_alpha_v1";
     private static final String K_PULL_LAUNCH = "pull_launch";
     private static final String K_INLINE_NOTIF = "inline_notif";
+    private static final String K_SURFACE_UNREAD_HOME = "surface_unread_home_v1";
     private static final String K_SHOW_MEDIA = "show_media";
     private static final String K_SHOW_AGENDA = "show_agenda";
     private static final String K_DOUBLE_TAP_LOCK = "double_tap_lock";
@@ -252,6 +254,7 @@ public class MainActivity extends Activity {
     private static final String K_BIOMETRIC_HIDE = "biometric_hide";
     private static final String K_KEEP_ALIVE = "keep_alive";
     private static final String K_SORT_BY_USAGE = "sort_by_usage";
+    private static final String K_SMART_BATTERY = "smart_battery_only_v1";
     private static final String K_STATUS_BAR_FULL = "status_bar_full_v1";
     private static final String K_HERO_HIGH_CONTRAST = "hero_high_contrast_v1";
     private static final String K_WAVE_IDLE_DOTS = "wave_idle_dots_v1";
@@ -259,6 +262,7 @@ public class MainActivity extends Activity {
     private static final String K_CUSTOM_ICONS = "custom_app_icons_v1";
     private static final String K_ONE_HAND_GRAVITY = "one_hand_gravity_v1";
     private static final String K_COIN_TAP_ACTION = "coin_tap_action_v1";
+    private static final String K_SEARCH_ENGINE = "search_engine_v1";
 
     private static final int REQ_EXPORT_JSON = 201;
     private static final int REQ_IMPORT_JSON = 202;
@@ -283,6 +287,18 @@ public class MainActivity extends Activity {
             "极速搜索（原生模式）",
             "唤醒小布语音助手",
             "隐藏悬浮按钮"
+    };
+    private static final String[] SEARCH_ENGINE_NAMES = {
+            "必应 (Bing)",
+            "百度",
+            "Google",
+            "夸克"
+    };
+    private static final String[] SEARCH_ENGINE_URLS = {
+            "https://www.bing.com/search?q=",
+            "https://www.baidu.com/s?wd=",
+            "https://www.google.com/search?q=",
+            "https://quark.sm.cn/s?q="
     };
     private static final String[] FONT_NAMES = {"现代纤巧", "均衡标准", "醒目中粗", "人文衬线", "极客等宽"};
     private static final String[] FONT_FAMILIES = {"sans-serif-light", "sans-serif", "sans-serif-medium", "serif", "monospace"};
@@ -309,37 +325,18 @@ public class MainActivity extends Activity {
     private LauncherApps launcherApps;
     private UserManager userManager;
     private WidgetHostHelper widgetHelper;
+    private PopupCardController popupController;
     private float dpUnit;
     private float textScale = 1.0f;
     private AuroraTheme theme;
     private Typeface typeface;
 
     // 视图组件
+    private FrameLayout workspaceRoot;
     private AuroraBackdropView backdropView;
     private LinearLayout workspaceMainColumn;
-    private LinearLayout persistentTopHeader; // 首页顶部：大时钟 + 日期/农历 + 状态栏 + 一览组件
-    private LinearLayout firstPageExtrasBox;  // 保留字段兼容
-    private View heroSpacerTop, heroSpacerBottom;
-    private TextClock mainClockView;
-    private TextView dateLunarView;
-    private HeroStatusBarView heroStatusBar;
-    private TextView stickyNoteSummaryView;
-    private LinearLayout glanceBarRow;
-    private TextView glanceRamPill;
-    private TextView lunarStatusView;
-    private TextView stickyNotePill;
-    private TextView agendaPill;
-    private LinearLayout homeWidgetsBox;
-    private TextView swipeHintPill;
-    private LinearLayout recentDockCard;
-    private LinearLayout dockRow1, dockRow2;
-    private LinearLayout recentIconsRow;
-    private LinearLayout folderCapsulesRow;
-    private HorizontalScrollView folderScroll;
-    private LinearLayout mediaWaveCard;
-    private ImageView mediaArtView;
-    private TextView mediaTitleView, mediaSubtitleView, mediaPlayBtn, mediaTimeView;
-    private View mediaProgressFill;
+    private FrameLayout headerHolder;
+    private NiagaraHeaderView niagaraHeaderView;
     private LinearLayout searchBarCard;
     private EditText searchInput;
     private ListView streamListView;
@@ -350,8 +347,12 @@ public class MainActivity extends Activity {
     private int currentTopInsetPx = 0;
     private int currentNavBottomPx = 0;
     private int currentImeBottomPx = 0;
+    private float currentImeLiftPx = 0f;
+    private boolean imeAnimating = false;
     private final Map<String, Drawable> folderIconCache = new HashMap<>();
     private Map<String, String> customIconsCache = null;
+    private Map<String, List<String>> appPopupsCache = null;
+    private List<String> lastSurfacedKeys = Collections.emptyList();
 
     private GestureDetector gestureDetector;
     private Dialog currentSheetDialog;
@@ -374,6 +375,17 @@ public class MainActivity extends Activity {
     private int savedDensityDpi;
     private int savedUiNightMode;
     private boolean lastResolvedLightState;
+    private boolean dateReceiverRegistered = false;
+
+    private final BroadcastReceiver dateChangeReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            uiHandler.post(() -> {
+                refreshHeroStatusWidgets();
+                refreshCalendarAgenda();
+            });
+        }
+    };
 
     private final Runnable clearHighlightTask = new Runnable() {
         @Override
@@ -396,6 +408,7 @@ public class MainActivity extends Activity {
 
         applyThemeAndWindowFlags();
         virtualSettingsApp = createSettingsAppEntry();
+        popupController = createPopupController();
         setContentView(buildNiagaraWorkspace());
         refreshHeroStatusWidgets();
         refreshHomeWidgets();
@@ -403,11 +416,12 @@ public class MainActivity extends Activity {
         readDiskAppCache();
         loadInstalledAppsAsync();
         launcherApps.registerCallback(pkgChangeCallback, uiHandler);
+        registerDateChangeReceiver();
 
         NotificationHubService.uiCallback = () -> {
             uiHandler.removeCallbacks(refreshNotificationsTask);
             long sinceResume = SystemClock.uptimeMillis() - lastResumeUptime;
-            long delay = (isResumed && sinceResume < 520L) ? (540L - sinceResume) : 220L;
+            long delay = (isResumed && sinceResume < 520L) ? (540L - sinceResume) : 200L;
             uiHandler.postDelayed(refreshNotificationsTask, delay);
         };
 
@@ -418,8 +432,33 @@ public class MainActivity extends Activity {
         registerAndroid13BackCallback();
     }
 
+    private void registerDateChangeReceiver() {
+        if (dateReceiverRegistered) return;
+        try {
+            IntentFilter filter = new IntentFilter();
+            filter.addAction(Intent.ACTION_DATE_CHANGED);
+            filter.addAction(Intent.ACTION_TIME_CHANGED);
+            filter.addAction(Intent.ACTION_TIMEZONE_CHANGED);
+            if (Build.VERSION.SDK_INT >= 33) {
+                registerReceiver(dateChangeReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+            } else {
+                registerReceiver(dateChangeReceiver, filter);
+            }
+            dateReceiverRegistered = true;
+        } catch (Throwable ignored) {}
+    }
+
     private final Runnable refreshNotificationsTask = () -> {
-        if (streamAdapter != null) streamAdapter.notifyDataSetChanged();
+        if (!inAllAppsMode && !searchActive && prefs.getBoolean(K_SURFACE_UNREAD_HOME, true)) {
+            List<String> nextSurfaced = computeSurfacedUnreadKeys();
+            if (!nextSurfaced.equals(lastSurfacedKeys)) {
+                rebuildStreamRows();
+            } else if (streamAdapter != null) {
+                streamAdapter.notifyDataSetChanged();
+            }
+        } else if (streamAdapter != null) {
+            streamAdapter.notifyDataSetChanged();
+        }
         refreshWeatherPill();
         if (isResumed) bindActiveMediaSession();
     };
@@ -548,7 +587,7 @@ public class MainActivity extends Activity {
     protected void onPause() {
         super.onPause();
         isResumed = false;
-        dismissAppPopupCard(false);
+        if (popupController != null) popupController.dismiss(false);
         uiHandler.removeCallbacks(resumeRefreshTask);
         lastPauseUptime = SystemClock.uptimeMillis();
         PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
@@ -568,6 +607,10 @@ public class MainActivity extends Activity {
     protected void onDestroy() {
         if (activeInstance == this) activeInstance = null;
         super.onDestroy();
+        if (dateReceiverRegistered) {
+            try { unregisterReceiver(dateChangeReceiver); } catch (Throwable ignored) {}
+            dateReceiverRegistered = false;
+        }
         try { launcherApps.unregisterCallback(pkgChangeCallback); } catch (Throwable ignored) {}
         try { if (mediaSessionMgr != null && mediaListening) mediaSessionMgr.removeOnActiveSessionsChangedListener(sessionChangeListener); } catch (Throwable ignored) {}
         try { if (activeMediaController != null) activeMediaController.unregisterCallback(mediaControllerCb); } catch (Throwable ignored) {}
@@ -579,7 +622,8 @@ public class MainActivity extends Activity {
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
-        if (inAllAppsMode || searchActive || (currentSheetDialog != null && currentSheetDialog.isShowing())) {
+        if (inAllAppsMode || searchActive || (popupController != null && popupController.isShowing())
+                || (currentSheetDialog != null && currentSheetDialog.isShowing())) {
             returnToHomeFavorites();
         } else {
             // 原本就在首页常用列表：0 运算，0 重建，保证系统窗口回弹动画 120Hz 丝滑！
@@ -631,149 +675,83 @@ public class MainActivity extends Activity {
         return tv;
     }
 
-    // ---------- 构建 Niagara 主界面（还原视频清爽头部 + 深度优化第一页常用应用栏） ----------
+    // ---------- 构建原生 Niagara 一体流主界面 ----------
     private View buildNiagaraWorkspace() {
         final FrameLayout root = new FrameLayout(this);
         workspaceRoot = root;
 
-        // 1. 底层：跟随系统白昼/暗夜变化的柔光流体/壁纸画布
+        // 1. 底层：日出/日落护眼柔光壁纸画布（单次绘制零重影）
         backdropView = new AuroraBackdropView(this);
         backdropView.configure(theme, prefs.getInt(K_DIM_PCT, 0), prefs.getBoolean(K_FLOW_ANIM, true));
         root.addView(backdropView, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        // 2. 主纵向容器
+        // 2. 主纵向一体流容器（Unified Stream）
         final LinearLayout mainColumn = new LinearLayout(this);
         mainColumn.setOrientation(LinearLayout.VERTICAL);
         workspaceMainColumn = mainColumn;
 
-        // 2.1 常驻顶部时钟与日期栏（如视频 9995.mp4 所示：左上方大时钟 + 日期星期 + 状态行，在首页与全部应用页均常驻）
-        persistentTopHeader = new LinearLayout(this);
-        persistentTopHeader.setOrientation(LinearLayout.VERTICAL);
-
-        TextClock mainClock = new TextClock(this);
-        mainClockView = mainClock;
-        String timeFmt = prefs.getBoolean(K_USE_24H, true) ? "HH:mm" : "h:mm";
-        mainClock.setFormat24Hour(timeFmt);
-        mainClock.setFormat12Hour(timeFmt);
-        mainClock.setTextColor(theme.textPrimary);
-        mainClock.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp(HERO_CLOCK_SP));
-        mainClock.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
-        mainClock.setLetterSpacing(0.01f);
-        mainClock.setFontFeatureSettings("tnum");
-        mainClock.setIncludeFontPadding(false);
-        mainClock.setShadowLayer(theme.isLight ? dp(1.5f) : dp(3.5f), 0f, dp(1f), theme.isLight ? 0x18000000 : 0x55000000);
-        mainClock.setOnClickListener(v -> {
-            if (searchActive || inAllAppsMode) {
-                returnToHomeFavorites();
-            } else {
-                startIntentSafely(new Intent(AlarmClock.ACTION_SHOW_ALARMS));
-            }
-        });
-        mainClock.setOnLongClickListener(v -> { openControlCenterSheet(); return true; });
-        persistentTopHeader.addView(mainClock, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        dateLunarView = new TextView(this);
-        // v2.6.0 字重对比：日期 Medium 14sp、alpha 0.85；农历为 Regular 更淡的次级层级
-        dateLunarView.setTextColor(theme.isLight ? 0xD9141824 : 0xD9F1F5F9);
-        dateLunarView.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp(14.0f));
-        dateLunarView.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        dateLunarView.setLetterSpacing(0.02f);
-        dateLunarView.setPadding(dp(2), dp(6), 0, 0);
-        dateLunarView.setShadowLayer(theme.isLight ? dp(1.0f) : dp(2.0f), 0f, dp(0.6f), theme.isLight ? 0x14000000 : 0x44000000);
-        dateLunarView.setOnClickListener(v -> {
-            if (searchActive || inAllAppsMode) {
-                returnToHomeFavorites();
-            } else {
-                openSystemCalendarApp();
-            }
-        });
-        dateLunarView.setOnLongClickListener(v -> { openControlCenterSheet(); return true; });
-        persistentTopHeader.addView(dateLunarView);
-
-        // 首页顶部无边框极简状态栏（方案 A：去边框、精简天气+高质感电量，支持设置切换完整模式与高对比度）
-        heroStatusBar = new HeroStatusBarView(this, theme, typeface, textScale, prefs.getBoolean(K_STATUS_BAR_FULL, false), new HeroStatusBarView.Callbacks() {
-            @Override public void onWeatherClick() { handleWeatherBarClick(); }
-            @Override public void onDeviceStatusClick() { showDeviceStatusDialog(); }
-            @Override public void onLongPress() { openControlCenterSheet(); }
-        });
-        heroStatusBar.setAestheticStyle(prefs.getBoolean(K_HERO_HIGH_CONTRAST, false)
-                ? HeroStatusBarView.STYLE_HIGH_CONTRAST : HeroStatusBarView.STYLE_AIRY);
-        LinearLayout.LayoutParams dsLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        dsLp.topMargin = dp(6);
-        dsLp.bottomMargin = dp(2);
-        persistentTopHeader.addView(heroStatusBar, dsLp);
-
-        // 一览日程行（原生 Niagara 无框排版：有近期日程且开启时轻盈浮现在状态栏下方）
-        agendaPill = makeText("", 12.6f, theme.isLight ? 0xCC141824 : 0xD9F1F5F9, false);
-        agendaPill.setSingleLine(true);
-        agendaPill.setEllipsize(TextUtils.TruncateAt.END);
-        agendaPill.setPadding(dp(2), dp(4), dp(4), dp(2));
-        agendaPill.setShadowLayer(theme.isLight ? dp(0.9f) : dp(2.0f), 0f, dp(0.6f), theme.isLight ? 0x16000000 : 0x48000000);
-        agendaPill.setVisibility(View.GONE);
-        agendaPill.setOnClickListener(v -> openActiveCalendarEvent());
-        LinearLayout.LayoutParams agLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        agLp.topMargin = dp(2);
-        persistentTopHeader.addView(agendaPill, agLp);
-
-        // 桌面速记便签行（无边框轻排版，留空自动隐藏）
-        stickyNotePill = makeText("", 12.6f, theme.isLight ? 0xCC141824 : 0xD9F1F5F9, false);
-        stickyNotePill.setSingleLine(true);
-        stickyNotePill.setEllipsize(TextUtils.TruncateAt.END);
-        stickyNotePill.setPadding(dp(2), dp(3), dp(4), dp(2));
-        stickyNotePill.setShadowLayer(theme.isLight ? dp(0.9f) : dp(2.0f), 0f, dp(0.6f), theme.isLight ? 0x16000000 : 0x48000000);
-        stickyNotePill.setVisibility(View.GONE);
-        stickyNotePill.setOnClickListener(v -> promptEditStickyNote());
-        LinearLayout.LayoutParams snPillLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        snPillLp.topMargin = dp(2);
-        persistentTopHeader.addView(stickyNotePill, snPillLp);
+        // 2.1 原生 Niagara 顶部一览 HeaderView（时钟 + 日期农历天气 + 按需电量 + 矢量日程/便签 + 极简媒体条 + 原生小组件）
+        niagaraHeaderView = new NiagaraHeaderView(
+                this,
+                theme,
+                typeface,
+                textScale,
+                prefs.getInt(K_CLOCK_STYLE, NiagaraHeaderView.CLOCK_CLASSIC),
+                prefs.getBoolean(K_USE_24H, true),
+                prefs.getBoolean(K_STATUS_BAR_FULL, false),
+                prefs.getBoolean(K_SMART_BATTERY, true),
+                prefs.getBoolean(K_HERO_HIGH_CONTRAST, false),
+                new NiagaraHeaderView.Callbacks() {
+                    @Override public void onClockClick() {
+                        if (searchActive || inAllAppsMode) returnToHomeFavorites();
+                        else startIntentSafely(new Intent(AlarmClock.ACTION_SHOW_ALARMS));
+                    }
+                    @Override public void onDateClick() {
+                        if (searchActive || inAllAppsMode) returnToHomeFavorites();
+                        else openSystemCalendarApp();
+                    }
+                    @Override public void onWeatherClick() { handleWeatherBarClick(); }
+                    @Override public void onDeviceStatusClick() { showDeviceStatusDialog(); }
+                    @Override public void onAgendaClick() { openActiveCalendarEvent(); }
+                    @Override public void onNoteClick() { promptEditStickyNote(); }
+                    @Override public void onMediaClick() { launchMediaPlayerApp(); }
+                    @Override public void onMediaTransport(int which) { triggerMediaTransport(which); }
+                    @Override public void onLongPress() { openControlCenterSheet(); }
+                });
         refreshStickyNotePill();
 
-        // 一览媒体播放器（播放音乐时自动浮现，带专辑封面与进度控制）
-        mediaWaveCard = buildMediaWaveCard();
-        LinearLayout.LayoutParams mediaLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        mediaLp.topMargin = dp(8);
-        persistentTopHeader.addView(mediaWaveCard, mediaLp);
+        headerHolder = new FrameLayout(this);
+        headerHolder.setClipChildren(false);
+        headerHolder.addView(niagaraHeaderView, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        // 原生桌面微件宿主容器（AppWidgetHost）
-        homeWidgetsBox = new LinearLayout(this);
-        homeWidgetsBox.setOrientation(LinearLayout.VERTICAL);
-        homeWidgetsBox.setVisibility(View.GONE);
-        LinearLayout.LayoutParams hwLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        hwLp.topMargin = dp(4);
-        persistentTopHeader.addView(homeWidgetsBox, hwLp);
-
-        mainColumn.addView(persistentTopHeader);
-
-        // 2.2 极速搜索与计算器输入卡（v2.7.0 改为贴底单手悬浮，紧贴软键盘顶缘）
+        // 2.2 贴底极速搜索栏（API 30+ 120Hz 紧贴软键盘滑升）
         searchBarCard = buildSearchBarCard();
         searchBarCard.setElevation(dp(10));
 
-        // 2.4 主应用列表 (第一页常用应用流 / 字母分组全部应用流)
+        // 2.3 主应用一体流 ListView
         streamListView = new ListView(this);
         streamListView.setDivider(null);
         streamListView.setVerticalScrollBarEnabled(false);
         streamListView.setOverScrollMode(View.OVER_SCROLL_NEVER);
         streamListView.setSelector(android.R.color.transparent);
         streamListView.setClipToPadding(false);
+        streamListView.setClipChildren(false);
         streamListView.setScrollingCacheEnabled(false);
         streamListView.setAnimationCacheEnabled(false);
+        streamListView.addHeaderView(headerHolder, null, false);
         streamAdapter = new StreamAdapter();
         streamListView.setAdapter(streamAdapter);
 
         streamListView.setOnItemClickListener((parent, view, position, id) -> {
-            if (position < 0 || position >= streamRows.size()) return;
-            StreamRow row = streamRows.get(position);
+            int idx = position - streamListView.getHeaderViewsCount();
+            if (idx < 0 || idx >= streamRows.size()) return;
+            StreamRow row = streamRows.get(idx);
             if (row.type == StreamRow.TYPE_CALC_RESULT) {
                 copyToClipboard(row.text);
             }
-        });;
+        });
 
         streamListView.setOnItemLongClickListener((parent, view, position, id) -> true);
 
@@ -791,38 +769,22 @@ public class MainActivity extends Activity {
             }
             @Override
             public void onScroll(AbsListView view, int firstVisibleItem, int visibleItemCount, int totalItemCount) {
-                // 波浪擦拭期间列表被程序化跳转/重排后，立即对新的可见项重新施加内推位移，避免残留或错位
                 if (waveCouplingActive) applyWaveDisplacementToVisibleItems();
             }
         });
 
-        LinearLayout.LayoutParams listLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
-        listLp.topMargin = dp(4);
-        listLp.bottomMargin = dp(12);
         streamListView.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
-            if ((b - t) != (ob - ot)) {
+            if ((b - t) != (ob - ot) || (r - l) != (or - ol)) {
                 applyOneHandedListPadding();
             }
         });
-        mainColumn.addView(streamListView, listLp);
+        mainColumn.addView(streamListView, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         root.addView(mainColumn, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        // 2.5 应用行左右滑实时视觉提示胶囊
-        swipeHintPill = makeText("", 12.5f, 0xFFFFFFFF, true);
-        swipeHintPill.setBackground(theme.solidAccentButton(dpUnit, 16));
-        swipeHintPill.setPadding(dp(16), dp(8), dp(16), dp(8));
-        swipeHintPill.setElevation(dp(8));
-        swipeHintPill.setVisibility(View.GONE);
-        FrameLayout.LayoutParams shLp = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-                Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
-        shLp.bottomMargin = dp(96);
-        root.addView(swipeHintPill, shLp);
-
-        // 3. 左右双侧流体波浪导轨：右侧支持静默圆点/字母切换，左侧支持真正的本侧镜像展开（静止完全隐形）
+        // 3. 左右双侧流体字母波浪导轨（自适应字母 + 静默圆点 + 无圆球纯字母涌出 + 左边缘静止零抢系统返回）
         rightWaveBar = new NiagaraWaveView(this, WAVE_SYMBOLS);
         rightWaveBar.setAlignLeft(false);
         leftGhostWaveBar = new NiagaraWaveView(this, WAVE_SYMBOLS);
@@ -832,10 +794,13 @@ public class MainActivity extends Activity {
 
         boolean autoHideWave = prefs.getBoolean(K_AUTO_HIDE_WAVE, false);
         boolean idleDots = prefs.getBoolean(K_WAVE_IDLE_DOTS, true);
+        boolean pullLaunch = prefs.getBoolean(K_PULL_LAUNCH, true);
         rightWaveBar.bindStyle(theme, typeface, autoHideWave);
         rightWaveBar.setIdleDotsMode(idleDots);
+        rightWaveBar.setPullLaunchEnabled(pullLaunch);
         leftGhostWaveBar.bindStyle(theme, typeface, autoHideWave);
         leftGhostWaveBar.setIdleDotsMode(idleDots);
+        leftGhostWaveBar.setPullLaunchEnabled(pullLaunch);
 
         NiagaraWaveView.Listener waveListener = new NiagaraWaveView.Listener() {
             @Override
@@ -845,24 +810,23 @@ public class MainActivity extends Activity {
                 if (backdropView != null) {
                     backdropView.onWaveInteract(normX, normY, strength);
                 }
-                jumpToLetterApplications(index, letter);
+                jumpToLetterApplications(index, letter, normY);
             }
 
             @Override
             public void onWaveRelease(int index, char letter, boolean triggerPullLaunch) {
                 isWaveScrubbing = false;
-                lastWaveReleaseMs = android.os.SystemClock.uptimeMillis();
+                lastWaveReleaseMs = SystemClock.uptimeMillis();
                 if (backdropView != null) {
                     backdropView.onWaveInteract(0.85f, 0.5f, 0f);
                 }
-                // 松手后保留所点字母开头应用的高亮 900ms 再平滑恢复全亮，让视线一眼锁定目标字母应用
                 uiHandler.removeCallbacks(clearHighlightTask);
                 uiHandler.postDelayed(clearHighlightTask, 900);
 
                 if (triggerPullLaunch && prefs.getBoolean(K_PULL_LAUNCH, true)) {
                     AppEntry top = letterTopApp.get(letter);
                     if (top != null) {
-                        Toast.makeText(MainActivity.this, "⚡ 极速直达：" + top.label, Toast.LENGTH_SHORT).show();
+                        Toast.makeText(MainActivity.this, "直达：" + top.label, Toast.LENGTH_SHORT).show();
                         launchApp(top);
                     }
                 }
@@ -894,7 +858,7 @@ public class MainActivity extends Activity {
         searchCardLp.bottomMargin = dp(12);
         root.addView(searchBarCard, searchCardLp);
 
-        // 4. 右下角 Niagara 灵动悬浮按钮（默认极速搜索，支持多任务后台 / 小布语音 / 隐藏）
+        // 4. 右下角 Niagara 灵动悬浮按钮（平滑形变淡出联动搜索）
         coinButton = new NiagaraCoinButton(this);
         coinButton.bindTheme(theme);
         applyCoinButtonConfig();
@@ -937,15 +901,60 @@ public class MainActivity extends Activity {
         root.addView(coinButton, coinLp);
         coinButton.bringToFront();
 
+        // API 30+ 120Hz 紧贴软键盘逐帧联动（WindowInsetsAnimation.Callback）
+        if (Build.VERSION.SDK_INT >= 30) {
+            root.setWindowInsetsAnimationCallback(new WindowInsetsAnimation.Callback(
+                    WindowInsetsAnimation.Callback.DISPATCH_MODE_STOP) {
+                @Override
+                public void onPrepare(WindowInsetsAnimation animation) {
+                    if ((animation.getTypeMask() & WindowInsets.Type.ime()) != 0) {
+                        imeAnimating = true;
+                    }
+                }
+
+                @Override
+                public WindowInsets onProgress(WindowInsets insets, List<WindowInsetsAnimation> runningAnimations) {
+                    int imeBot = insets.getInsets(WindowInsets.Type.ime()).bottom;
+                    int navBot = insets.getInsets(WindowInsets.Type.navigationBars()).bottom;
+                    currentNavBottomPx = navBot;
+                    currentImeBottomPx = Math.max(navBot, imeBot);
+                    currentImeLiftPx = Math.max(0f, currentImeBottomPx - currentNavBottomPx);
+                    if (searchBarCard != null && searchBarCard.getVisibility() == View.VISIBLE) {
+                        searchBarCard.setTranslationY(-currentImeLiftPx + (1f - searchTransitionProgress) * dp(18));
+                    }
+                    if (searchActive && streamListView != null) {
+                        int searchBotPad = currentImeBottomPx + dp(82);
+                        if (streamListView.getPaddingBottom() != searchBotPad) {
+                            streamListView.setPadding(
+                                    streamListView.getPaddingLeft(),
+                                    streamListView.getPaddingTop(),
+                                    streamListView.getPaddingRight(),
+                                    searchBotPad);
+                        }
+                    }
+                    return insets;
+                }
+
+                @Override
+                public void onEnd(WindowInsetsAnimation animation) {
+                    if ((animation.getTypeMask() & WindowInsets.Type.ime()) != 0) {
+                        imeAnimating = false;
+                        applySearchBarInsets();
+                        applyOneHandedListPadding();
+                    }
+                }
+            });
+        }
+
         root.setOnApplyWindowInsetsListener((v, insets) -> {
             int topInset = insets.getSystemWindowInsetTop();
             int navBottom = insets.getSystemWindowInsetBottom();
             int imeBottom = 0;
             if (Build.VERSION.SDK_INT >= 30) {
                 try {
-                    topInset = insets.getInsets(android.view.WindowInsets.Type.statusBars()).top;
-                    navBottom = insets.getInsets(android.view.WindowInsets.Type.navigationBars()).bottom;
-                    imeBottom = insets.getInsets(android.view.WindowInsets.Type.ime()).bottom;
+                    topInset = insets.getInsets(WindowInsets.Type.statusBars()).top;
+                    navBottom = insets.getInsets(WindowInsets.Type.navigationBars()).bottom;
+                    imeBottom = insets.getInsets(WindowInsets.Type.ime()).bottom;
                 } catch (Throwable ignored) {}
             } else {
                 imeBottom = navBottom;
@@ -953,16 +962,18 @@ public class MainActivity extends Activity {
             currentTopInsetPx = topInset;
             currentNavBottomPx = navBottom;
             currentImeBottomPx = Math.max(navBottom, imeBottom);
+            if (!imeAnimating) {
+                currentImeLiftPx = Math.max(0f, currentImeBottomPx - currentNavBottomPx);
+            }
 
-            mainColumn.setPadding(dp(22), topInset + dp(20), dp(34), 0);
+            mainColumn.setPadding(dp(22), 0, dp(34), 0);
             applySearchBarInsets();
             applyOneHandedListPadding();
 
             for (NiagaraWaveView wb : new NiagaraWaveView[]{leftGhostWaveBar, rightWaveBar}) {
                 FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) wb.getLayoutParams();
-                // 🚀 人体工学下移：把字母导轨整体下调至单手大拇指舒适弧形区，单手大拇指自然落在最上方的字母
-                lp.topMargin = topInset + dp(168);
-                lp.bottomMargin = navBottom + dp(90);
+                lp.topMargin = topInset + dp(164);
+                lp.bottomMargin = navBottom + dp(88);
                 wb.setLayoutParams(lp);
             }
             boolean coinOnLeft = prefs.getBoolean(K_COIN_LEFT, false);
@@ -984,57 +995,80 @@ public class MainActivity extends Activity {
         ViewGroup.LayoutParams rawLp = searchBarCard.getLayoutParams();
         if (rawLp instanceof FrameLayout.LayoutParams) {
             FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) rawLp;
-            int targetBot = Math.max(currentNavBottomPx, currentImeBottomPx) + dp(10);
-            if (lp.bottomMargin != targetBot) {
-                lp.bottomMargin = targetBot;
-                searchBarCard.setLayoutParams(lp);
+            if (Build.VERSION.SDK_INT >= 30) {
+                int restBot = currentNavBottomPx + dp(10);
+                if (lp.bottomMargin != restBot) {
+                    lp.bottomMargin = restBot;
+                    searchBarCard.setLayoutParams(lp);
+                }
+                if (searchBarCard.getVisibility() == View.VISIBLE) {
+                    searchBarCard.setTranslationY(-currentImeLiftPx + (1f - searchTransitionProgress) * dp(18));
+                }
+            } else {
+                int targetBot = Math.max(currentNavBottomPx, currentImeBottomPx) + dp(10);
+                if (lp.bottomMargin != targetBot) {
+                    lp.bottomMargin = targetBot;
+                    searchBarCard.setLayoutParams(lp);
+                }
             }
         }
     }
 
     /**
-     * 点到或滑到某个字母时，立即显示该字母开头的相关应用（并高亮该字母组）
+     * 点到或滑到某个字母时，仅在命中字母变化时刷新高亮与指尖垂直对齐定位，杜绝每像素全量 notifyDataSetChanged。
      */
-    private void jumpToLetterApplications(int idx, char ch) {
+    private void jumpToLetterApplications(int idx, char ch, float normY) {
         if (ch == '★') {
-            returnToHomeFavorites();
+            if (inAllAppsMode || searchActive) {
+                returnToHomeFavorites();
+            }
             return;
         }
         if (searchActive) {
             searchActive = false;
             searchInput.setText("");
             searchBarCard.setVisibility(View.GONE);
+            searchTransitionTargetOn = false;
+            searchTransitionProgress = 0f;
+            updateSearchTransition(0f);
         }
 
+        boolean wasInAllApps = inAllAppsMode;
         if (!inAllAppsMode) {
             inAllAppsMode = true;
             updateFirstPageExtrasVisibility();
             rebuildStreamRows();
         }
-        highlightedGroup = ch;
-        streamAdapter.notifyDataSetChanged();
-
-        Integer pos = letterRowIndex.get(ch);
-        if (pos == null) pos = findNearestLetterPosition(idx);
-        if (pos != null) {
-            final int targetPos = pos;
-            streamListView.smoothScrollBy(0, 0);
-            streamListView.setSelectionFromTop(targetPos, 0);
-            streamListView.post(() -> streamListView.setSelectionFromTop(targetPos, 0));
+        if (ch != highlightedGroup || !wasInAllApps) {
+            highlightedGroup = ch;
+            streamAdapter.notifyDataSetChanged();
+            Integer pos = letterRowIndex.get(ch);
+            if (pos == null) pos = findNearestLetterPosition(idx);
+            if (pos != null) {
+                int listH = streamListView.getHeight();
+                int anchorOffset = Math.max(0, Math.min(Math.round(listH * 0.55f), Math.round(normY * listH) - dp(44)));
+                final int targetAdapterPos = pos + streamListView.getHeaderViewsCount();
+                final int targetOffset = anchorOffset;
+                streamListView.smoothScrollBy(0, 0);
+                streamListView.setSelectionFromTop(targetAdapterPos, targetOffset);
+                if (!wasInAllApps) {
+                    streamListView.post(() -> streamListView.setSelectionFromTop(targetAdapterPos, targetOffset));
+                }
+            }
         }
         hideSoftKeyboard();
     }
 
-    // ---------- v2.7.0 边缘波浪导轨 ↔ 主列表物理联动（安全区内微推 + 图标视差，零左边界裁切） ----------
-    private static final float WAVE_LIST_SIGMA_DP = 72f;          // 列表高斯σ
-    private static final float WAVE_LIST_PUSH_DP = 12f;           // 列表项最大横向内推（< 22dp 左边距，永不裁切图标）
-    private static final float WAVE_LIST_ICON_PARALLAX_DP = 4f;   // 图标额外视差
-    private static final float WAVE_LIST_SCALE_GAIN = 0.03f;      // 微缩放增益
-    private static final long WAVE_REBOUND_MS = 180L;             // 松手阻尼回弹时长
+    // ---------- 边缘波浪导轨 ↔ 主列表物理联动（安全区内微推 + 图标视差，零左边界裁切） ----------
+    private static final float WAVE_LIST_SIGMA_DP = 72f;
+    private static final float WAVE_LIST_PUSH_DP = 12f;
+    private static final float WAVE_LIST_ICON_PARALLAX_DP = 4f;
+    private static final float WAVE_LIST_SCALE_GAIN = 0.03f;
+    private static final long WAVE_REBOUND_MS = 180L;
 
     private boolean waveCouplingActive = false;
     private float waveCouplingTouchY = -1f;
-    private float waveCouplingDir = -1f;   // -1：向屏幕左侧（右手导轨内侧）推；+1：左手导轨向右推
+    private float waveCouplingDir = -1f;
     private ValueAnimator waveReboundAnim;
     private final int[] waveListLoc = new int[2];
 
@@ -1077,7 +1111,7 @@ public class MainActivity extends Activity {
         int count = streamListView.getChildCount();
         for (int i = 0; i < count; i++) {
             View child = streamListView.getChildAt(i);
-            if (child == null) continue;
+            if (child == null || child == headerHolder) continue;
             float centerY = waveListLoc[1] + child.getTop() + child.getHeight() * 0.5f;
             float d = centerY - waveCouplingTouchY;
             float factor = (float) Math.exp(-(d * d) / (2.0f * sigma * sigma));
@@ -1100,8 +1134,8 @@ public class MainActivity extends Activity {
     private View findRowIconView(View itemView) {
         if ("app_row_v2".equals(itemView.getTag()) && itemView instanceof ViewGroup) {
             View card = ((ViewGroup) itemView).getChildAt(0);
-            if (card instanceof ViewGroup && ((ViewGroup) card).getChildCount() > 1) {
-                View icon = ((ViewGroup) card).getChildAt(1);
+            if (card instanceof ViewGroup && ((ViewGroup) card).getChildCount() > 0) {
+                View icon = ((ViewGroup) card).getChildAt(0);
                 if (icon instanceof ImageView) return icon;
             }
         }
@@ -1130,10 +1164,10 @@ public class MainActivity extends Activity {
         if (streamListView == null) return;
         int count = streamListView.getChildCount();
         final List<View> views = new ArrayList<>();
-        final List<float[]> from = new ArrayList<>(); // {itemTx, itemScale, iconTx}
+        final List<float[]> from = new ArrayList<>();
         for (int i = 0; i < count; i++) {
             View child = streamListView.getChildAt(i);
-            if (child == null) continue;
+            if (child == null || child == headerHolder) continue;
             View icon = findRowIconView(child);
             float tx = child.getTranslationX();
             float sc = child.getScaleX();
@@ -1160,10 +1194,10 @@ public class MainActivity extends Activity {
                 if (icon != null) icon.setTranslationX(f[2] * v);
             }
         });
-        anim.addListener(new android.animation.AnimatorListenerAdapter() {
+        anim.addListener(new AnimatorListenerAdapter() {
             @Override
-            public void onAnimationEnd(android.animation.Animator animation) {
-                if (waveReboundAnim != anim) return; // 被新一轮擦拭取消：保持当前位移，由新位移接管
+            public void onAnimationEnd(Animator animation) {
+                if (waveReboundAnim != anim) return;
                 waveReboundAnim = null;
                 for (View child : views) resetItemWaveTransform(child);
             }
@@ -1173,12 +1207,15 @@ public class MainActivity extends Activity {
     }
 
     private Integer findNearestLetterPosition(int idx) {
-        for (int i = idx; i < WAVE_SYMBOLS.length(); i++) {
-            Integer p = letterRowIndex.get(WAVE_SYMBOLS.charAt(i));
+        String syms = rightWaveBar != null ? rightWaveBar.getSymbols() : WAVE_SYMBOLS;
+        if (syms == null || syms.isEmpty()) return null;
+        int clamped = Math.max(0, Math.min(syms.length() - 1, idx));
+        for (int i = clamped; i < syms.length(); i++) {
+            Integer p = letterRowIndex.get(syms.charAt(i));
             if (p != null) return p;
         }
-        for (int i = idx; i >= 0; i--) {
-            Integer p = letterRowIndex.get(WAVE_SYMBOLS.charAt(i));
+        for (int i = clamped; i >= 0; i--) {
+            Integer p = letterRowIndex.get(syms.charAt(i));
             if (p != null) return p;
         }
         return null;
@@ -1216,12 +1253,12 @@ public class MainActivity extends Activity {
     private void animateStreamListTransition() {
         if (streamListView == null) return;
         streamListView.animate().cancel();
-        streamListView.setAlpha(0.55f);
-        streamListView.setTranslationY(dp(12));
+        streamListView.setAlpha(0.60f);
+        streamListView.setTranslationY(dp(10));
         streamListView.animate()
                 .alpha(1f)
                 .translationY(0f)
-                .setDuration(170L)
+                .setDuration(165L)
                 .setInterpolator(new android.view.animation.DecelerateInterpolator(1.6f))
                 .start();
     }
@@ -1230,55 +1267,69 @@ public class MainActivity extends Activity {
         if (streamListView == null) return;
         int left = streamListView.getPaddingLeft();
         int right = streamListView.getPaddingRight();
+        int topInset = currentTopInsetPx;
         int navBot = currentNavBottomPx;
+
         if (searchActive) {
+            int searchTopPad = topInset + dp(12);
             int searchBotPad = Math.max(navBot, currentImeBottomPx) + dp(82);
-            if (streamListView.getPaddingTop() != dp(12) || streamListView.getPaddingBottom() != searchBotPad) {
-                streamListView.setPadding(left, dp(12), right, searchBotPad);
+            if (streamListView.getPaddingTop() != searchTopPad || streamListView.getPaddingBottom() != searchBotPad) {
+                streamListView.setPadding(left, searchTopPad, right, searchBotPad);
             }
             return;
         }
+
         int botPad = navBot + dp(82);
-        if (inAllAppsMode || !prefs.getBoolean(K_ONE_HAND_GRAVITY, true)) {
-            int topP = inAllAppsMode ? dp(6) : dp(4);
+        if (inAllAppsMode) {
+            int topP = topInset + dp(10);
             if (streamListView.getPaddingTop() != topP || streamListView.getPaddingBottom() != botPad) {
                 streamListView.setPadding(left, topP, right, botPad);
             }
             return;
         }
-        int availH = streamListView.getHeight();
-        if (availH <= 0) {
-            streamListView.setPadding(left, dp(8), right, botPad);
+
+        // 首页一体流模式：顶部时钟自然贴合状态栏下方，剩余留白由 NiagaraHeaderView 底部呼吸垫片动态控制
+        int homeTopPad = topInset + dp(20);
+        if (streamListView.getPaddingTop() != homeTopPad || streamListView.getPaddingBottom() != botPad) {
+            streamListView.setPadding(left, homeTopPad, right, botPad);
+        }
+        if (niagaraHeaderView == null) return;
+        if (!prefs.getBoolean(K_ONE_HAND_GRAVITY, true)) {
+            niagaraHeaderView.setGravitySpacerHeight(dp(16));
             return;
         }
+        int listH = streamListView.getHeight();
+        int listW = streamListView.getWidth() - left - right;
+        if (listH <= 0 || listW <= 0) {
+            niagaraHeaderView.setGravitySpacerHeight(dp(18));
+            return;
+        }
+        int availH = listH - homeTopPad - botPad;
+        int headerContentH = niagaraHeaderView.measureContentHeightWithoutSpacer(listW);
         float rowHeightPx = dp(56f * getRowSpacingMultiplier());
-        int estContentH = Math.round(streamRows.size() * rowHeightPx);
-        int extraSpace = availH - estContentH - botPad;
-        int topPad = dp(8);
-        if (extraSpace > dp(36)) {
-            topPad = Math.max(dp(8), Math.min(Math.round(extraSpace * 0.62f), availH / 2));
-            // v2.6.0 首屏留白美学：时钟下方保留至少 18% 屏高的纯净留白，随时钟高度联动，且不超过剩余空间
-            int clockH = mainClockView != null ? mainClockView.getHeight() : 0;
-            int skyMin = Math.max(Math.round(getResources().getDisplayMetrics().heightPixels * 0.18f),
-                    Math.round(clockH * 1.2f));
-            topPad = Math.max(topPad, Math.min(skyMin, Math.min(extraSpace, availH / 2)));
+        int estRowsH = Math.round(streamRows.size() * rowHeightPx);
+        int extraSpace = availH - headerContentH - estRowsH;
+
+        int spacer;
+        if (extraSpace <= dp(24)) {
+            spacer = dp(12);
+        } else if (niagaraHeaderView.hasPinnedWidgetsVisible() || niagaraHeaderView.isMediaVisible()) {
+            spacer = Math.max(dp(12), Math.min(dp(32), Math.round(extraSpace * 0.25f)));
+        } else {
+            spacer = Math.max(dp(18), Math.min(Math.round(extraSpace * 0.62f), availH / 2));
+            int skyMin = Math.round(getResources().getDisplayMetrics().heightPixels * 0.14f);
+            spacer = Math.max(spacer, Math.min(skyMin, Math.min(extraSpace, availH / 2)));
         }
-        if (streamListView.getPaddingTop() != topPad || streamListView.getPaddingBottom() != botPad) {
-            streamListView.setPadding(left, topPad, right, botPad);
-        }
+        niagaraHeaderView.setGravitySpacerHeight(spacer);
     }
 
     private void applyCoinButtonConfig() {
         if (coinButton == null) return;
         int act = prefs.getInt(K_COIN_TAP_ACTION, 1);
-        if (act == 3 || searchActive) {
-            coinButton.setVisibility(View.GONE);
-        } else {
-            coinButton.setVisibility(View.VISIBLE);
-            if (act == 1) coinButton.setIconMode(NiagaraCoinButton.ICON_SEARCH);
-            else if (act == 2) coinButton.setIconMode(NiagaraCoinButton.ICON_ASSIST);
-            else coinButton.setIconMode(NiagaraCoinButton.ICON_RECENTS);
-        }
+        if (act == 1) coinButton.setIconMode(NiagaraCoinButton.ICON_SEARCH);
+        else if (act == 2) coinButton.setIconMode(NiagaraCoinButton.ICON_ASSIST);
+        else coinButton.setIconMode(NiagaraCoinButton.ICON_RECENTS);
+        coinButton.setUserHidden(act == 3);
     }
 
     private void openSystemCalendarApp() {
@@ -1295,15 +1346,16 @@ public class MainActivity extends Activity {
     }
 
     private void refreshHomeWidgets() {
-        if (homeWidgetsBox == null || widgetHelper == null) return;
+        if (niagaraHeaderView == null || widgetHelper == null) return;
+        LinearLayout widgetsBox = niagaraHeaderView.getWidgetsContainer();
         if (inAllAppsMode || searchActive) {
-            homeWidgetsBox.setVisibility(View.GONE);
+            widgetsBox.setVisibility(View.GONE);
             return;
         }
-        widgetHelper.populateWidgets(this, prefs, homeWidgetsBox, theme, dpUnit, (widget, info) -> {
+        widgetHelper.populateWidgets(this, prefs, widgetsBox, theme, dpUnit, (widget, info) -> {
             String label = info.loadLabel(getPackageManager());
-            showSingleChoiceDialog("🧩 微件设置 · " + label,
-                    new String[]{"📏 紧凑高度 (96dp)", "📐 标准高度 (136dp)", "🖼 宽展高度 (196dp)", "🗑 移除此微件"},
+            showSingleChoiceDialog("微件设置 · " + label,
+                    new String[]{"紧凑高度 (96dp)", "标准高度 (136dp)", "宽展高度 (196dp)", "移除此微件"},
                     1, w -> {
                         if (w == 0) widgetHelper.updateWidgetHeight(prefs, widget.id, 96);
                         else if (w == 1) widgetHelper.updateWidgetHeight(prefs, widget.id, 136);
@@ -1312,85 +1364,93 @@ public class MainActivity extends Activity {
                         refreshHomeWidgets();
                     });
         });
+        applyOneHandedListPadding();
     }
 
-    // ---------- v2.6.0 灵动搜索过渡：壁纸景深 / Hero 渐隐 / 圆钮同步 ----------
-    private static final float HERO_CLOCK_SP = 44f;
+    // ---------- 灵动搜索过渡（220ms 完整执行：壁纸景深 + Header 平滑淡出 + 圆钮柔和缩隐 + 搜索栏滑升） ----------
     private static final long SEARCH_TRANSITION_MS = 220L;
     private float searchTransitionProgress = 0f;
     private boolean searchTransitionTargetOn = false;
     private ValueAnimator searchTransitionAnim;
 
-    /**
-     * 驱动搜索过渡进度（0=首屏，1=完全搜索态）：
-     * 壁纸缩放 1.0→0.96 + 35% 压暗、Hero 时钟/日期/状态栏上滑淡出（-30dp）、搜索卡从下方浮入、圆钮圆环强调。
-     */
     public void updateSearchTransition(float progress) {
         float p = Math.max(0f, Math.min(1f, progress));
         searchTransitionProgress = p;
         if (backdropView != null) backdropView.setSearchTransitionProgress(p);
-        if (heroStatusBar != null) heroStatusBar.applySearchFadeProgress(p);
-        int heroVis = p >= 0.999f ? View.INVISIBLE : View.VISIBLE;
-        if (mainClockView != null) {
-            mainClockView.setAlpha(1f - p);
-            mainClockView.setTranslationY(-dp(30) * p);
-            if (mainClockView.getVisibility() != heroVis) mainClockView.setVisibility(heroVis);
+        if (niagaraHeaderView != null) niagaraHeaderView.applySearchFadeProgress(p);
+        if (coinButton != null) coinButton.applySearchTransition(p);
+        if (searchBarCard != null && searchBarCard.getVisibility() == View.VISIBLE) {
+            searchBarCard.setAlpha(p);
+            float baseLift = Build.VERSION.SDK_INT >= 30 ? -currentImeLiftPx : 0f;
+            searchBarCard.setTranslationY(baseLift + (1f - p) * dp(18));
         }
-        if (dateLunarView != null) {
-            dateLunarView.setAlpha(1f - p);
-            dateLunarView.setTranslationY(-dp(24) * p);
-            if (dateLunarView.getVisibility() != heroVis) dateLunarView.setVisibility(heroVis);
-        }
-        if (searchBarCard != null) {
-            if (searchBarCard.getVisibility() == View.VISIBLE) {
-                searchBarCard.setAlpha(p);
-                searchBarCard.setTranslationY((1f - p) * dp(18));
-            } else {
-                searchBarCard.setAlpha(1f);
-                searchBarCard.setTranslationY(0f);
-            }
-        }
-        if (coinButton != null) coinButton.setSearchProgress(p);
     }
 
-    private void animateSearchTransition(boolean on) {
-        if (on == searchTransitionTargetOn) return;
+    private void animateSearchTransition(final boolean on) {
+        if (on == searchTransitionTargetOn && searchTransitionAnim == null
+                && Math.abs(searchTransitionProgress - (on ? 1f : 0f)) < 0.001f) {
+            return;
+        }
         searchTransitionTargetOn = on;
-        if (searchTransitionAnim != null) {
-            searchTransitionAnim.cancel();
-            searchTransitionAnim = null;
+        ValueAnimator prevAnim = searchTransitionAnim;
+        searchTransitionAnim = null;
+        if (prevAnim != null) {
+            prevAnim.cancel();
+        }
+        if (on && searchBarCard != null) {
+            searchBarCard.setVisibility(View.VISIBLE);
+            searchBarCard.bringToFront();
+        }
+        if (!on && !inAllAppsMode && niagaraHeaderView != null) {
+            niagaraHeaderView.setVisibility(View.VISIBLE);
         }
         updateSearchTransition(searchTransitionProgress);
-        ValueAnimator anim = ValueAnimator.ofFloat(searchTransitionProgress, on ? 1f : 0f);
+        final ValueAnimator anim = ValueAnimator.ofFloat(searchTransitionProgress, on ? 1f : 0f);
         anim.setDuration(SEARCH_TRANSITION_MS);
         anim.setInterpolator(new PathInterpolator(0.25f, 0.1f, 0.25f, 1.0f));
         anim.addUpdateListener(va -> updateSearchTransition((float) va.getAnimatedValue()));
+        anim.addListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                if (searchTransitionAnim != anim) return;
+                searchTransitionAnim = null;
+                if (niagaraHeaderView != null) {
+                    if (searchActive || inAllAppsMode) {
+                        niagaraHeaderView.setVisibility(View.GONE);
+                    } else {
+                        niagaraHeaderView.setVisibility(View.VISIBLE);
+                        niagaraHeaderView.resetSearchFade();
+                    }
+                }
+                if (searchBarCard != null && !searchActive) {
+                    searchBarCard.setVisibility(View.GONE);
+                    searchBarCard.setAlpha(1f);
+                    searchBarCard.setTranslationY(0f);
+                }
+            }
+        });
         searchTransitionAnim = anim;
         anim.start();
     }
 
     private void updateFirstPageExtrasVisibility() {
-        animateSearchTransition(searchActive);
-        if (firstPageExtrasBox != null) {
-            firstPageExtrasBox.setVisibility(View.GONE);
-        }
         boolean homeOnly = !inAllAppsMode && !searchActive;
-        if (persistentTopHeader != null) {
-            // 原生 Niagara 逻辑：切入全部应用或搜索态时收起顶部大时钟区，释放完整列表可视空间
-            persistentTopHeader.setVisibility(homeOnly ? View.VISIBLE : View.GONE);
+        if (niagaraHeaderView != null) {
+            if (homeOnly) {
+                niagaraHeaderView.setVisibility(View.VISIBLE);
+                if (!searchTransitionTargetOn && searchTransitionAnim == null) {
+                    niagaraHeaderView.resetSearchFade();
+                }
+                refreshStickyNotePill();
+                refreshCalendarAgenda();
+                updateMediaCardUi();
+                refreshHomeWidgets();
+            } else if (inAllAppsMode && !searchActive) {
+                niagaraHeaderView.setVisibility(View.GONE);
+            }
+            // 进入搜索态时保持 HeaderView 短暂可见，由 animateSearchTransition(true) 执行完整 220ms 淡出后在回调隐藏
         }
-        if (agendaPill != null && !homeOnly) agendaPill.setVisibility(View.GONE);
-        if (stickyNotePill != null && !homeOnly) stickyNotePill.setVisibility(View.GONE);
-        if (mediaWaveCard != null && !homeOnly) mediaWaveCard.setVisibility(View.GONE);
-        if (homeWidgetsBox != null) {
-            if (homeOnly) refreshHomeWidgets();
-            else homeWidgetsBox.setVisibility(View.GONE);
-        }
-        if (homeOnly) {
-            refreshStickyNotePill();
-            refreshCalendarAgenda();
-            updateMediaCardUi();
-        }
+        animateSearchTransition(searchActive);
         if (streamListView != null) {
             streamListView.setVisibility(View.VISIBLE);
             streamListView.setStackFromBottom(searchActive);
@@ -1407,94 +1467,27 @@ public class MainActivity extends Activity {
         }
     }
 
-    private LinearLayout buildMediaWaveCard() {
-        LinearLayout card = new LinearLayout(this);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setBackground(theme.glassCard(dpUnit, 20));
-        card.setPadding(dp(14), dp(12), dp(10), dp(12));
-        card.setVisibility(View.GONE);
-
-        LinearLayout topRow = new LinearLayout(this);
-        topRow.setGravity(Gravity.CENTER_VERTICAL);
-
-        mediaArtView = new ImageView(this);
-        mediaArtView.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        mediaArtView.setVisibility(View.GONE);
-        LinearLayout.LayoutParams artLp = new LinearLayout.LayoutParams(dp(42), dp(42));
-        artLp.rightMargin = dp(10);
-        topRow.addView(mediaArtView, artLp);
-
-        LinearLayout metaCol = new LinearLayout(this);
-        metaCol.setOrientation(LinearLayout.VERTICAL);
-        mediaTitleView = makeText("", 15, theme.textPrimary, true);
-        mediaTitleView.setSingleLine(true);
-        mediaTitleView.setEllipsize(TextUtils.TruncateAt.END);
-        mediaSubtitleView = makeText("", 12, theme.textSecondary, false);
-        mediaSubtitleView.setSingleLine(true);
-        mediaSubtitleView.setEllipsize(TextUtils.TruncateAt.END);
-        metaCol.addView(mediaTitleView);
-        metaCol.addView(mediaSubtitleView);
-        topRow.addView(metaCol, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
-        String[] btns = {"⏮\uFE0E", "▶\uFE0E", "⏭\uFE0E"};
-        for (int i = 0; i < 3; i++) {
-            final int actionIdx = i;
-            TextView btn = makeText(btns[i], 18, theme.textPrimary, false);
-            btn.setGravity(Gravity.CENTER);
-            btn.setOnClickListener(v -> triggerMediaTransport(actionIdx));
-            topRow.addView(btn, new LinearLayout.LayoutParams(dp(40), dp(40)));
-            if (i == 1) mediaPlayBtn = btn;
-        }
-        card.addView(topRow);
-
-        FrameLayout barTrack = new FrameLayout(this);
-        GradientDrawable trackBg = new GradientDrawable();
-        trackBg.setColor(theme.isLight ? 0x22000000 : 0x33FFFFFF);
-        trackBg.setCornerRadius(dp(2));
-        barTrack.setBackground(trackBg);
-
-        mediaProgressFill = new View(this);
-        GradientDrawable fillBg = new GradientDrawable();
-        fillBg.setColor(theme.accent);
-        fillBg.setCornerRadius(dp(2));
-        mediaProgressFill.setBackground(fillBg);
-        mediaProgressFill.setPivotX(0f);
-        barTrack.addView(mediaProgressFill, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(3)));
-
-        LinearLayout.LayoutParams trackLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(3));
-        trackLp.topMargin = dp(8);
-        trackLp.rightMargin = dp(4);
-        card.addView(barTrack, trackLp);
-
-        mediaTimeView = makeText("", 11, theme.textSecondary, false);
-        mediaTimeView.setPadding(0, dp(4), 0, 0);
-        card.addView(mediaTimeView);
-        card.setOnClickListener(v -> launchMediaPlayerApp());
-        return card;
-    }
-
     private LinearLayout buildSearchBarCard() {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setBackground(theme.glassCard(dpUnit, 22));
-        box.setPadding(dp(16), dp(10), dp(16), dp(10));
+        box.setPadding(dp(14), dp(10), dp(12), dp(10));
         box.setVisibility(View.GONE);
 
         LinearLayout inputRow = new LinearLayout(this);
         inputRow.setGravity(Gravity.CENTER_VERTICAL);
 
-        TextView icon = makeText("🔍", 15, theme.accent, false);
-        icon.setPadding(0, 0, dp(10), 0);
-        inputRow.addView(icon);
+        SearchGlyphView searchIc = new SearchGlyphView(this, SearchGlyphView.IC_SEARCH, theme.accent, dpUnit);
+        LinearLayout.LayoutParams sicLp = new LinearLayout.LayoutParams(dp(18), dp(18));
+        sicLp.rightMargin = dp(10);
+        inputRow.addView(searchIc, sicLp);
 
         searchInput = new EditText(this);
-        searchInput.setHint("搜应用 / 拼音 / 快捷方式 (如 扫一扫) / 算式 / 换算");
+        searchInput.setHint("搜应用 / 拼音 / 快捷方式 / 算式 / 换算");
         searchInput.setHintTextColor((theme.textSecondary & 0x00FFFFFF) | 0x88000000);
         searchInput.setTextColor(theme.textPrimary);
         searchInput.setTypeface(typeface);
-        searchInput.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp(15.5f));
+        searchInput.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp(15.2f));
         searchInput.setSingleLine(true);
         searchInput.setBackground(null);
         searchInput.setPadding(0, dp(4), 0, dp(4));
@@ -1502,9 +1495,10 @@ public class MainActivity extends Activity {
         searchInput.setImeOptions(EditorInfo.IME_ACTION_GO);
         inputRow.addView(searchInput, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-        TextView pasteBtn = makeText("📋", 14, theme.textSecondary, false);
-        pasteBtn.setPadding(dp(8), dp(4), dp(4), dp(4));
-        pasteBtn.setOnClickListener(v -> {
+        FrameLayout pasteWrap = new FrameLayout(this);
+        pasteWrap.addView(new SearchGlyphView(this, SearchGlyphView.IC_CLIPBOARD, theme.textSecondary, dpUnit),
+                new FrameLayout.LayoutParams(dp(16), dp(16), Gravity.CENTER));
+        pasteWrap.setOnClickListener(v -> {
             ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
             if (cm != null && cm.hasPrimaryClip() && cm.getPrimaryClip() != null && cm.getPrimaryClip().getItemCount() > 0) {
                 CharSequence clip = cm.getPrimaryClip().getItemAt(0).getText();
@@ -1516,18 +1510,19 @@ public class MainActivity extends Activity {
             }
             Toast.makeText(this, "剪贴板为空", Toast.LENGTH_SHORT).show();
         });
-        inputRow.addView(pasteBtn);
+        inputRow.addView(pasteWrap, new LinearLayout.LayoutParams(dp(34), dp(34)));
 
-        TextView closeBtn = makeText("✕", 16, theme.textSecondary, false);
-        closeBtn.setPadding(dp(10), dp(4), dp(4), dp(4));
-        closeBtn.setOnClickListener(v -> {
+        FrameLayout closeWrap = new FrameLayout(this);
+        closeWrap.addView(new SearchGlyphView(this, SearchGlyphView.IC_CLOSE, theme.textSecondary, dpUnit),
+                new FrameLayout.LayoutParams(dp(15), dp(15), Gravity.CENTER));
+        closeWrap.setOnClickListener(v -> {
             if (searchInput.getText().length() > 0) {
                 searchInput.setText("");
             } else {
                 closeInstantSearch();
             }
         });
-        inputRow.addView(closeBtn);
+        inputRow.addView(closeWrap, new LinearLayout.LayoutParams(dp(34), dp(34)));
         box.addView(inputRow);
 
         searchInput.addTextChangedListener(new TextWatcher() {
@@ -1540,18 +1535,66 @@ public class MainActivity extends Activity {
             boolean go = actionId == EditorInfo.IME_ACTION_GO
                     || (event != null && event.getKeyCode() == KeyEvent.KEYCODE_ENTER && event.getAction() == KeyEvent.ACTION_DOWN);
             if (go) {
-                for (int i = streamRows.size() - 1; i >= 0; i--) {
-                    StreamRow r = streamRows.get(i);
-                    if (r.app != null) {
-                        launchApp(r.app);
-                        return true;
-                    }
-                }
+                return executeBestSearchResult();
             }
-            return go;
+            return false;
         });
 
         return box;
+    }
+
+    /** 回车智能执行最底端（距离拇指最近）的首个有效搜索结果：计算复制 / 应用启动 / 快捷方式 / 网页搜索。 */
+    private boolean executeBestSearchResult() {
+        for (int i = streamRows.size() - 1; i >= 0; i--) {
+            StreamRow r = streamRows.get(i);
+            if (r.type == StreamRow.TYPE_CALC_RESULT) {
+                copyToClipboard(r.text);
+                return true;
+            }
+            if (r.type == StreamRow.TYPE_SHORTCUT_RESULT && r.shortcut != null) {
+                startSearchShortcut(r.shortcut, r.app);
+                return true;
+            }
+            if (r.app != null) {
+                launchApp(r.app);
+                return true;
+            }
+            if (r.type == StreamRow.TYPE_WEB_SEARCH && r.text != null && !r.text.isEmpty()) {
+                openWebSearch(r.text);
+                return true;
+            }
+        }
+        String raw = searchInput != null ? searchInput.getText().toString().trim() : "";
+        if (!raw.isEmpty()) {
+            openWebSearch(raw);
+            return true;
+        }
+        return false;
+    }
+
+    private String getCurrentSearchEngineName() {
+        int idx = Math.max(0, Math.min(SEARCH_ENGINE_NAMES.length - 1, prefs.getInt(K_SEARCH_ENGINE, 0)));
+        return SEARCH_ENGINE_NAMES[idx];
+    }
+
+    private void openWebSearch(String query) {
+        if (query == null || query.trim().isEmpty()) return;
+        int idx = Math.max(0, Math.min(SEARCH_ENGINE_URLS.length - 1, prefs.getInt(K_SEARCH_ENGINE, 0)));
+        String url = SEARCH_ENGINE_URLS[idx] + Uri.encode(query.trim());
+        startIntentSafely(new Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        closeInstantSearch();
+    }
+
+    private void startSearchShortcut(ShortcutInfo sc, AppEntry owner) {
+        try {
+            launchedExternalApp = true;
+            launcherApps.startShortcut(sc, null, null);
+            hideSoftKeyboard();
+            uiHandler.postDelayed(() -> { if (searchActive) closeInstantSearch(); }, 350);
+        } catch (Throwable t) {
+            launchedExternalApp = false;
+            if (owner != null) launchApp(owner);
+        }
     }
 
     private void openInstantSearch() {
@@ -1561,7 +1604,9 @@ public class MainActivity extends Activity {
             searchBarCard.bringToFront();
             updateFirstPageExtrasVisibility();
             rebuildStreamRows();
-            if (!streamRows.isEmpty()) streamListView.setSelection(streamRows.size() - 1);
+            if (streamListView != null && streamListView.getCount() > 0) {
+                streamListView.setSelection(streamListView.getCount() - 1);
+            }
             animateStreamListTransition();
         }
         searchInput.requestFocus();
@@ -1576,7 +1621,6 @@ public class MainActivity extends Activity {
         searchActive = false;
         hideSoftKeyboard();
         searchInput.setText("");
-        searchBarCard.setVisibility(View.GONE);
         updateFirstPageExtrasVisibility();
         rebuildStreamRows();
         stopListFlingAndResetTop();
@@ -1594,14 +1638,13 @@ public class MainActivity extends Activity {
     }
 
     private void returnToHomeFavorites() {
-        dismissAppPopupCard(false);
+        if (popupController != null) popupController.dismiss(false);
         if (currentSheetDialog != null && currentSheetDialog.isShowing()) currentSheetDialog.dismiss();
         cooldownWaveBars();
         boolean needRebuild = searchActive || inAllAppsMode;
         if (searchActive) {
             searchActive = false;
             searchInput.setText("");
-            searchBarCard.setVisibility(View.GONE);
         }
         hideSoftKeyboard();
         uiHandler.removeCallbacks(clearHighlightTask);
@@ -1617,27 +1660,14 @@ public class MainActivity extends Activity {
 
     private void applyHeroStatusMetrics(LunarStatusEngine.DeviceMetrics dm) {
         if (dm == null) return;
-        if (dateLunarView != null) {
-            java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("M月d日 EEE", Locale.CHINESE);
-            String dateStr = sdf.format(new java.util.Date());
-            String lunar = (dm.lunarLine != null && !dm.lunarLine.isEmpty()) ? dm.lunarLine : "清风徐来";
-            // 去除「·」分割符：以自然字距区隔，农历降为次级字重/透明度
-            android.text.SpannableStringBuilder dsb = new android.text.SpannableStringBuilder(dateStr);
-            dsb.append("   ");
-            int lunarStart = dsb.length();
-            dsb.append(lunar);
-            dsb.setSpan(new android.text.style.TypefaceSpan("sans-serif"), lunarStart, dsb.length(),
-                    android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            dsb.setSpan(new android.text.style.ForegroundColorSpan(theme.isLight ? 0x99141824 : 0x99F1F5F9),
-                    lunarStart, dsb.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            dateLunarView.setText(dsb);
-        }
-        if (heroStatusBar != null) {
-            heroStatusBar.updateMetrics(dm.batteryPct, dm.charging, dm.batteryTempC, dm.ramAvailGb);
+        if (niagaraHeaderView != null) {
+            SimpleDateFormat sdf = new SimpleDateFormat("M月d日 EEE", Locale.CHINESE);
+            String dateStr = sdf.format(new Date());
+            niagaraHeaderView.updateDateLunar(dateStr, dm.lunarLine);
+            niagaraHeaderView.updateMetrics(dm.batteryPct, dm.charging, dm.batteryTempC, dm.ramAvailGb);
         }
         refreshWeatherPill();
         refreshStickyNotePill();
-        refreshRecentDock();
     }
 
     private String getEffectiveWeatherSummary() {
@@ -1649,8 +1679,8 @@ public class MainActivity extends Activity {
     }
 
     private void refreshWeatherPill() {
-        if (heroStatusBar == null) return;
-        heroStatusBar.updateWeather(getEffectiveWeatherSummary());
+        if (niagaraHeaderView == null) return;
+        niagaraHeaderView.updateWeather(getEffectiveWeatherSummary());
     }
 
     private void handleWeatherBarClick() {
@@ -1757,24 +1787,10 @@ public class MainActivity extends Activity {
     }
 
     private void refreshStickyNotePill() {
+        if (niagaraHeaderView == null) return;
         String note = prefs.getString(K_STICKY_NOTE, "").trim();
-        if (stickyNoteSummaryView != null) {
-            if (note.isEmpty()) {
-                stickyNoteSummaryView.setText("点击写下一句话备忘、取件码或今日待办...");
-                stickyNoteSummaryView.setTextColor(theme.textSecondary);
-            } else {
-                stickyNoteSummaryView.setText(note);
-                stickyNoteSummaryView.setTextColor(theme.textPrimary);
-            }
-        }
-        if (stickyNotePill != null) {
-            if (note.isEmpty()) {
-                stickyNotePill.setVisibility(View.GONE);
-            } else {
-                stickyNotePill.setText("📌 " + note);
-                stickyNotePill.setVisibility(View.VISIBLE);
-            }
-        }
+        niagaraHeaderView.updateStickyNote(note);
+        applyOneHandedListPadding();
     }
 
     private void styleGlassEditText(EditText input, String hint) {
@@ -1973,171 +1989,6 @@ public class MainActivity extends Activity {
         holder[0] = showBottomSheetDialog(box);
     }
 
-    private final List<String> currentDockKeys = new ArrayList<>();
-    private final Runnable refreshRecentDockTask = this::refreshRecentDock;
-
-    void postRefreshRecentDockDelayed(long delayMs) {
-        uiHandler.removeCallbacks(refreshRecentDockTask);
-        uiHandler.postDelayed(refreshRecentDockTask, delayMs);
-    }
-
-    boolean isRecentDockVisible() {
-        return firstPageExtrasBox != null && firstPageExtrasBox.getVisibility() == View.VISIBLE;
-    }
-
-    void refreshRecentDock() {
-        if (recentDockCard == null || dockRow1 == null || dockRow2 == null) return;
-        if (!isRecentDockVisible()) return;
-        if (allApps.isEmpty()) {
-            recentDockCard.setVisibility(View.GONE);
-            currentDockKeys.clear();
-            return;
-        }
-
-        // 🚀 核心流畅度优化（120Hz 满帧回弹）：
-        // 将全部应用列表复制快照并在后台 computation 线程中计算权重分数与多级排序，
-        // 彻底杜绝主线程在退出应用返回桌面动画高峰期的 CPU 计算与 I/O 阻塞！
-        final Set<String> hidden = new HashSet<>(getStringList(K_HIDDEN));
-        final List<String> activePkgs = GestureLockService.getActivePackages();
-        final List<String> recents = getStringList(K_RECENT_KEYS);
-        final List<String> favList = getStringList(K_FAVS);
-        final List<AppEntry> allAppsSnapshot = new ArrayList<>(allApps);
-
-        AppExecutors.getInstance().computation().execute(() -> {
-            JSONObject launchCounts = getLaunchCountsJson();
-            List<AppEntry> candidateApps = new ArrayList<>();
-            Set<String> seen = new HashSet<>();
-
-            // 1. 优先提取无障碍后台捕获的最近活跃应用
-            for (String pkg : activePkgs) {
-                AppEntry a = findAppByPackageInSnapshot(allAppsSnapshot, pkg);
-                if (a != null && !hidden.contains(a.idKey) && seen.add(a.idKey)) {
-                    candidateApps.add(a);
-                }
-            }
-
-            // 2. 其余所有已安装非隐藏应用，按启动频次与常用权重降序排序
-            List<AppEntry> others = new ArrayList<>();
-            for (AppEntry a : allAppsSnapshot) {
-                if (!hidden.contains(a.idKey) && !seen.contains(a.idKey)) {
-                    others.add(a);
-                }
-            }
-
-            Collections.sort(others, (x, y) -> {
-                int cx = launchCounts.optInt(x.idKey, 0);
-                int cy = launchCounts.optInt(y.idKey, 0);
-                int fx = favList.contains(x.idKey) ? 500 : 0;
-                int fy = favList.contains(y.idKey) ? 500 : 0;
-                int rx = recents.indexOf(x.idKey);
-                int ry = recents.indexOf(y.idKey);
-                int rBonusX = rx >= 0 ? Math.max(0, 100 - rx * 10) : 0;
-                int rBonusY = ry >= 0 ? Math.max(0, 100 - ry * 10) : 0;
-                int scoreX = cx * 10 + fx + rBonusX;
-                int scoreY = cy * 10 + fy + rBonusY;
-                return Integer.compare(scoreY, scoreX);
-            });
-
-            for (AppEntry a : others) {
-                if (seen.add(a.idKey)) {
-                    candidateApps.add(a);
-                }
-            }
-
-            // 取出按频次排序的前 7 个应用
-            final List<AppEntry> top7 = new ArrayList<>();
-            final List<String> newKeys = new ArrayList<>();
-            for (AppEntry a : candidateApps) {
-                top7.add(a);
-                newKeys.add(a.idKey);
-                if (top7.size() == 7) break;
-            }
-
-            // 切回主线程比对 Diff 并按需局部构建 UI
-            uiHandler.post(() -> {
-                if (recentDockCard == null || dockRow1 == null || dockRow2 == null) return;
-                if (top7.isEmpty()) {
-                    recentDockCard.setVisibility(View.GONE);
-                    currentDockKeys.clear();
-                    return;
-                }
-
-                // 🚀 核心优化：智能 Diff 比较
-                // 若高频应用列表与排列顺序没有发生变化，直接 0 操作，绝不执行 removeAllViews 与重新布局！
-                if (newKeys.equals(currentDockKeys) && recentDockCard.getVisibility() == View.VISIBLE && dockRow1.getChildCount() > 0) {
-                    return;
-                }
-
-                currentDockKeys.clear();
-                currentDockKeys.addAll(newKeys);
-
-                dockRow1.removeAllViews();
-                dockRow2.removeAllViews();
-
-                // 第一排：放前 4 个高频应用
-                for (int i = 0; i < Math.min(4, top7.size()); i++) {
-                    AppEntry app = top7.get(i);
-                    dockRow1.addView(buildDockAppCell(app), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
-                }
-
-                // 第二排：放第 5、6、7 个高频应用
-                for (int i = 4; i < top7.size(); i++) {
-                    AppEntry app = top7.get(i);
-                    dockRow2.addView(buildDockAppCell(app), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
-                }
-
-                // 若总数不足 7 个应用，用空 View 补齐前 3 列以保持等宽
-                while (dockRow2.getChildCount() < 3 && top7.size() < 7) {
-                    View dummy = new View(MainActivity.this);
-                    dockRow2.addView(dummy, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
-                }
-
-                // 第二排最后一个（第 8 个）：专属「后台直达」多任务应用图标
-                dockRow2.addView(buildRecentsOverviewCell(), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
-
-                recentDockCard.setVisibility(View.VISIBLE);
-                if (firstPageExtrasBox != null) firstPageExtrasBox.requestLayout();
-            });
-        });
-    }
-
-    private View buildDockAppCell(final AppEntry app) {
-        LinearLayout cell = new LinearLayout(this);
-        cell.setOrientation(LinearLayout.VERTICAL);
-        cell.setGravity(Gravity.CENTER);
-        cell.setPadding(dp(2), dp(4), dp(2), dp(4));
-
-        ImageView iv = new ImageView(this);
-        iv.setImageDrawable(getShapedIcon(app));
-        LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(dp(44), dp(44));
-        cell.addView(iv, ilp);
-
-        TextView tv = new TextView(this);
-        tv.setText(app.label);
-        tv.setTextColor(theme.textPrimary);
-        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp(11.2f));
-        tv.setTypeface(typeface);
-        tv.setSingleLine(true);
-        tv.setEllipsize(TextUtils.TruncateAt.END);
-        tv.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        tlp.topMargin = dp(4);
-        cell.addView(tv, tlp);
-
-        cell.setOnClickListener(v -> {
-            v.animate().scaleX(0.90f).scaleY(0.90f).setDuration(60)
-                    .withEndAction(() -> v.animate().scaleX(1f).scaleY(1f).setDuration(90).start())
-                    .start();
-            scheduleAppLaunch(app);
-        });
-        cell.setOnLongClickListener(v -> {
-            showAppActionSheet(app);
-            return true;
-        });
-        return cell;
-    }
-
     void openColorOsRecents() {
         List<AppEntry> recents = new ArrayList<>();
         Set<String> seen = new HashSet<>();
@@ -2153,114 +2004,102 @@ public class MainActivity extends Activity {
             if (recents.size() >= 7) break;
             if (seen.add(a.idKey)) recents.add(a);
         }
-        ColorOsRecentsOverlay.show(this, recents, app -> launchApp(app), () -> {
-            refreshRecentDock();
+        ColorOsRecentsOverlay.show(this, recents, app -> launchApp(app), null);
+    }
+
+    // ---------- 统一 PopupCardController 宿主桥接 ----------
+    private PopupCardController createPopupController() {
+        return new PopupCardController(new PopupCardController.Host() {
+            @Override public Activity getActivity() { return MainActivity.this; }
+            @Override public FrameLayout getWorkspaceRoot() { return workspaceRoot; }
+            @Override public View[] getBlurTargets() { return new View[]{workspaceMainColumn, backdropView}; }
+            @Override public AuroraTheme getThemeObj() { return theme; }
+            @Override public Typeface getTypeface() { return typeface; }
+            @Override public float getDp() { return dpUnit; }
+            @Override public float sp(float size) { return MainActivity.this.sp(size); }
+            @Override public int getTopInsetPx() { return currentTopInsetPx; }
+            @Override public int getNavBottomPx() { return currentNavBottomPx; }
+            @Override public Drawable getAppIcon(AppEntry app) { return getShapedIcon(app); }
+            @Override public View findRowIconView(View rowView) { return MainActivity.this.findRowIconView(rowView); }
+            @Override public boolean isFavorite(AppEntry app) { return app != null && getStringList(K_FAVS).contains(app.idKey); }
+            @Override public boolean isInlineNotifEnabled() { return prefs.getBoolean(K_INLINE_NOTIF, true); }
+            @Override public boolean isVirtualSettingsApp(AppEntry app) { return app == virtualSettingsApp; }
+            @Override public List<ShortcutInfo> queryPopupShortcuts(AppEntry app) { return MainActivity.this.queryPopupShortcuts(app); }
+            @Override public Drawable loadShortcutIcon(ShortcutInfo sc) {
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N_MR1 && launcherApps != null && sc != null) {
+                        return launcherApps.getShortcutIconDrawable(sc, getResources().getDisplayMetrics().densityDpi);
+                    }
+                } catch (Throwable ignored) {}
+                return null;
+            }
+            @Override public void startPopupShortcut(ShortcutInfo sc, AppEntry app) { MainActivity.this.startPopupShortcut(sc, app); }
+            @Override public void launchApp(AppEntry app, View sourceView) { MainActivity.this.launchApp(app, sourceView); }
+            @Override public void toggleFavorite(AppEntry app) { toggleFavoriteQuickly(app); }
+            @Override public void openRenameApp(AppEntry app) { promptRenameApp(app); }
+            @Override public void openCustomAppIcon(AppEntry app) { showCustomAppIconDialog(app); }
+            @Override public void openAppDetails(AppEntry app) {
+                if (app == null || app.component == null) return;
+                try {
+                    launchedExternalApp = true;
+                    launcherApps.startAppDetailsActivity(app.component, app.user, null, null);
+                } catch (Throwable t) {
+                    launchedExternalApp = false;
+                }
+            }
+            @Override public void hideApp(AppEntry app) {
+                if (app == null) return;
+                List<String> hid = getStringList(K_HIDDEN);
+                if (!hid.contains(app.idKey)) hid.add(app.idKey);
+                putStringList(K_HIDDEN, hid);
+                List<String> favs = getStringList(K_FAVS);
+                favs.remove(app.idKey);
+                putStringList(K_FAVS, favs);
+                rebuildStreamRows();
+                Toast.makeText(MainActivity.this, "已隐藏，可在控制中心恢复", Toast.LENGTH_SHORT).show();
+            }
+            @Override public void uninstallApp(AppEntry app) {
+                if (app == null || app.component == null) return;
+                Intent i = new Intent(Intent.ACTION_DELETE, Uri.parse("package:" + app.component.getPackageName()));
+                if (app.user != null) i.putExtra(Intent.EXTRA_USER, app.user);
+                startIntentSafely(i);
+            }
+            @Override public void openAddAppToFolder(AppEntry app) { promptAddAppToFolder(app); }
+            @Override public void openControlCenter() { openControlCenterSheet(); }
+            @Override public void hideSoftKeyboard() { MainActivity.this.hideSoftKeyboard(); }
+            @Override public void markLaunchedExternalApp(boolean launched) { launchedExternalApp = launched; }
+            @Override public List<AppEntry> getAppPopupChildren(AppEntry parent) { return MainActivity.this.getAppPopupChildren(parent); }
+            @Override public void openEditAppPopupChildren(AppEntry parent) { promptEditAppPopupChildren(parent); }
+            @Override public void removeAppPopupChild(AppEntry parent, AppEntry child) { MainActivity.this.removeAppPopupChild(parent, child); }
+            @Override public JSONObject getFolderJson(int folderIdx) { return getFoldersArray().optJSONObject(folderIdx); }
+            @Override public AppEntry findAppByKey(String idKey) { return MainActivity.this.findAppByKey(idKey); }
+            @Override public void openEditFolderApps(int folderIdx) { promptSelectFolderApps(folderIdx); }
+            @Override public void openRenameFolder(int folderIdx) { promptRenameFolder(folderIdx); }
+            @Override public void openReorderFolderApps(int folderIdx) { promptReorderFolderApps(folderIdx); }
+            @Override public boolean toggleFolderTapLaunchFirst(int folderIdx) { return MainActivity.this.toggleFolderTapLaunchFirst(folderIdx); }
+            @Override public void deleteFolder(int folderIdx) {
+                JSONArray arr = getFoldersArray();
+                if (folderIdx >= 0 && folderIdx < arr.length()) {
+                    arr.remove(folderIdx);
+                    saveFoldersArray(arr);
+                }
+            }
         });
     }
 
-    private View buildRecentsOverviewCell() {
-        LinearLayout cell = new LinearLayout(this);
-        cell.setOrientation(LinearLayout.VERTICAL);
-        cell.setGravity(Gravity.CENTER);
-        cell.setPadding(dp(2), dp(4), dp(2), dp(4));
-
-        ImageView iv = new ImageView(this);
-        iv.setImageDrawable(createRecentsTaskIcon(dp(44)));
-        LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(dp(44), dp(44));
-        cell.addView(iv, ilp);
-
-        TextView tv = new TextView(this);
-        tv.setText("后台直达");
-        tv.setTextColor(theme.accent);
-        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp(11.2f));
-        tv.setTypeface(Typeface.create(typeface, Typeface.BOLD));
-        tv.setSingleLine(true);
-        tv.setEllipsize(TextUtils.TruncateAt.END);
-        tv.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        tlp.topMargin = dp(4);
-        cell.addView(tv, tlp);
-
-        cell.setOnClickListener(v -> {
-            v.animate().scaleX(0.90f).scaleY(0.90f).setDuration(60)
-                    .withEndAction(() -> v.animate().scaleX(1f).scaleY(1f).setDuration(90).start())
-                    .start();
-            openColorOsRecents();
-        });
-        cell.setOnLongClickListener(v -> {
-            showDeviceStatusDialog();
-            return true;
-        });
-        return cell;
-    }
-
-    private Drawable createRecentsTaskIcon(int size) {
-        Bitmap bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
-        Canvas cv = new Canvas(bmp);
-
-        int shape = prefs.getInt(K_ICON_SHAPE, 0);
-        Path clip = new Path();
-        if (shape == 3) { // 极简正圆
-            clip.addCircle(size * 0.5f, size * 0.5f, size * 0.47f, Path.Direction.CW);
-        } else if (shape == 2) { // One UI / HyperOS
-            buildSuperEllipsePath(clip, size * 0.025f, size * 0.95f, 0.34);
-        } else { // 超椭圆 / 液态玻璃等
-            buildSuperEllipsePath(clip, size * 0.025f, size * 0.95f, 0.42);
-        }
-
-        Paint bgPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        bgPaint.setColor(theme.isLight ? 0x22000000 : 0x33FFFFFF);
-        cv.drawPath(clip, bgPaint);
-
-        Paint strokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        strokePaint.setStyle(Paint.Style.STROKE);
-        strokePaint.setStrokeWidth(dp(1.2f));
-        strokePaint.setColor((theme.accent & 0x00FFFFFF) | 0x88000000);
-        cv.drawPath(clip, strokePaint);
-
-        // 绘制质感多任务卡片图标（前置卡片 + 悬浮景深卡片）
-        Paint cardPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        cardPaint.setStyle(Paint.Style.STROKE);
-        cardPaint.setStrokeWidth(dp(1.8f));
-        cardPaint.setColor(theme.accent);
-
-        Paint fillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        fillPaint.setStyle(Paint.Style.FILL);
-        fillPaint.setColor((theme.accent & 0x00FFFFFF) | 0x33000000);
-
-        float cr = dp(4f);
-        RectF rBack = new RectF(size * 0.22f, size * 0.20f, size * 0.60f, size * 0.68f);
-        cv.drawRoundRect(rBack, cr, cr, fillPaint);
-        cv.drawRoundRect(rBack, cr, cr, cardPaint);
-
-        RectF rFront = new RectF(size * 0.40f, size * 0.32f, size * 0.78f, size * 0.80f);
-        fillPaint.setColor((theme.textPrimary & 0x00FFFFFF) | 0x28000000);
-        cardPaint.setColor(theme.textPrimary);
-        cv.drawRoundRect(rFront, cr, cr, fillPaint);
-        cv.drawRoundRect(rFront, cr, cr, cardPaint);
-
-        return new BitmapDrawable(getResources(), bmp);
-    }
-
-    // ---------- 双向应用行手势与双击锁屏 ----------
+    // ---------- 双向应用/文件夹行手势与双击锁屏 ----------
     private float touchStartX, touchStartY;
     private int swipedRowPos = -1;
     private View swipedRowView = null;
     private boolean rowSwiping = false;
+    private boolean rightRowSwiping = false;
+    private boolean rightSwipeThresholdTicked = false;
+    private boolean leftSwipeThresholdTicked = false;
+    private int touchSlopPx = 0;
     private boolean touchDownOnAppRow = false;
     private boolean touchDownInHeader = false;
     private Runnable pendingAppLaunchRunnable = null;
     private long lastTapDownTime = 0;
-
-    private void scheduleAppLaunch(final AppEntry app) {
-        cancelPendingAppLaunch();
-        pendingAppLaunchRunnable = () -> {
-            pendingAppLaunchRunnable = null;
-            launchApp(app);
-        };
-        uiHandler.postDelayed(pendingAppLaunchRunnable, 140);
-    }
 
     private void cancelPendingAppLaunch() {
         if (pendingAppLaunchRunnable != null) {
@@ -2269,18 +2108,23 @@ public class MainActivity extends Activity {
         }
     }
 
+    private boolean hasClearableNotification(AppEntry app) {
+        if (app == null || app.component == null) return false;
+        return NotificationHubService.hasClearableNotifications(app.component.getPackageName());
+    }
+
     @Override
     public boolean dispatchTouchEvent(MotionEvent ev) {
-        // Pop-up 浮层展示期间：事件交由浮层自身（空白处点击即关闭），不再触发列表手势
-        if (appPopupScrim != null) {
+        if (popupController != null && popupController.isShowing()) {
             return super.dispatchTouchEvent(ev);
         }
         int action = ev.getActionMasked();
         if (action == MotionEvent.ACTION_DOWN) {
             rightRowSwiping = false;
+            rightSwipeThresholdTicked = false;
+            leftSwipeThresholdTicked = false;
             long nowDown = SystemClock.uptimeMillis();
             if (nowDown - lastTapDownTime < 340) {
-                // 🚀 连续点击（双击）进行中，第一时间取消第一次点击可能预约的应用启动，防止误开应用
                 cancelPendingAppLaunch();
             }
             lastTapDownTime = nowDown;
@@ -2289,17 +2133,21 @@ public class MainActivity extends Activity {
             swipedRowPos = -1;
             swipedRowView = null;
             touchDownOnAppRow = false;
+            touchDownInHeader = false;
             touchStartX = ev.getRawX();
             touchStartY = ev.getRawY();
 
             if (streamListView != null) {
                 int[] loc = new int[2];
                 streamListView.getLocationOnScreen(loc);
-                touchDownInHeader = touchStartY < loc[1];
+                if (touchStartY < loc[1]) {
+                    touchDownInHeader = true;
+                }
                 int w = getWindow().getDecorView().getWidth();
                 int edgeGuard = (inAllAppsMode || searchActive) ? dp(48) : dp(38);
                 boolean inWaveEdge = (touchStartX > w - edgeGuard) || (touchStartX < edgeGuard);
-                // 若按在悬浮搜索圆钮上，直接豁免边缘波浪与列表滑动拦截，确保左下/右下点击 100% 灵敏
+
+                // 按在悬浮圆钮上时豁免列表拦截，确保点击与四向手势 100% 灵敏
                 if (coinButton != null && coinButton.getVisibility() == View.VISIBLE) {
                     int[] cLoc = new int[2];
                     coinButton.getLocationOnScreen(cLoc);
@@ -2309,23 +2157,32 @@ public class MainActivity extends Activity {
                     }
                 }
                 if (!inWaveEdge && !searchActive) {
-                    int pos = streamListView.pointToPosition(
+                    int rawPos = streamListView.pointToPosition(
                             (int) (touchStartX - loc[0]), (int) (touchStartY - loc[1]));
-                    if (pos != AdapterView.INVALID_POSITION && pos < streamRows.size() && streamRows.get(pos).app != null) {
-                        View child = streamListView.getChildAt(pos - streamListView.getFirstVisiblePosition());
-                        swipedRowPos = pos;
-                        swipedRowView = child;
-                        touchDownOnAppRow = true;
+                    int headerCount = streamListView.getHeaderViewsCount();
+                    if (rawPos != AdapterView.INVALID_POSITION && rawPos < headerCount) {
+                        touchDownInHeader = true;
+                    } else if (rawPos != AdapterView.INVALID_POSITION) {
+                        int pos = rawPos - headerCount;
+                        if (pos >= 0 && pos < streamRows.size()) {
+                            StreamRow row = streamRows.get(pos);
+                            if (row.app != null || row.type == StreamRow.TYPE_FOLDER) {
+                                View child = streamListView.getChildAt(rawPos - streamListView.getFirstVisiblePosition());
+                                swipedRowPos = pos;
+                                swipedRowView = child;
+                                touchDownOnAppRow = true;
 
-                        // 🚀 精确识别：如果点击落在应用行右侧大片空白区域，判定为桌面空白处
-                        if (child instanceof ViewGroup) {
-                            ViewGroup vg = (ViewGroup) child;
-                            if (vg.getChildCount() > 0) {
-                                View content = vg.getChildAt(0);
-                                int[] cLoc = new int[2];
-                                content.getLocationOnScreen(cLoc);
-                                if (touchStartX > cLoc[0] + content.getWidth() + dp(12)) {
-                                    touchDownOnAppRow = false;
+                                // 精确识别应用行右侧大片空白区为桌面空白，支持双击熄屏
+                                if (row.app != null && child instanceof ViewGroup) {
+                                    ViewGroup vg = (ViewGroup) child;
+                                    if (vg.getChildCount() > 0) {
+                                        View content = vg.getChildAt(0);
+                                        int[] cLoc = new int[2];
+                                        content.getLocationOnScreen(cLoc);
+                                        if (touchStartX > cLoc[0] + content.getWidth() + dp(12)) {
+                                            touchDownOnAppRow = false;
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -2333,69 +2190,54 @@ public class MainActivity extends Activity {
                 }
             }
         } else if (swipedRowPos >= 0) {
-            // 🚀 v2.6.0 右滑直达 Pop-up：touchSlop + 极角隔离（dx > slop && dx > |dy|*2），优先于左滑逻辑判定
-            AppEntry swipeApp = swipedRowPos < streamRows.size() ? streamRows.get(swipedRowPos).app : null;
-            if (!(rowSwiping && !rightRowSwiping) && handleItemSwipeRight(swipedRowView, swipeApp, ev)) {
+            StreamRow swipedRow = swipedRowPos < streamRows.size() ? streamRows.get(swipedRowPos) : null;
+            // 1. 右滑统一触发 Pop-up（同时支持应用行与文件夹行）
+            if (!(rowSwiping && !rightRowSwiping) && handleItemSwipeRight(swipedRowView, swipedRow, ev)) {
                 return true;
             }
+            // 2. 安全化左滑：仅当目标应用存在可清除未读通知时才响应，绝不误删常用应用
+            AppEntry targetApp = (swipedRow != null) ? swipedRow.app : null;
+            boolean canLeftClear = targetApp != null && targetApp != virtualSettingsApp && hasClearableNotification(targetApp);
             float dx = ev.getRawX() - touchStartX;
             float dy = ev.getRawY() - touchStartY;
-            if (!rowSwiping && action == MotionEvent.ACTION_MOVE && -dx > dp(20) && -dx > Math.abs(dy) * 2.0f) {
+            if (!rowSwiping && canLeftClear && action == MotionEvent.ACTION_MOVE
+                    && -dx > dp(20) && -dx > Math.abs(dy) * 2.0f) {
                 rowSwiping = true;
+                leftSwipeThresholdTicked = false;
+                if (streamListView != null) streamListView.requestDisallowInterceptTouchEvent(true);
                 MotionEvent cancel = MotionEvent.obtain(ev);
                 cancel.setAction(MotionEvent.ACTION_CANCEL);
                 super.dispatchTouchEvent(cancel);
                 if (gestureDetector != null) gestureDetector.onTouchEvent(cancel);
                 cancel.recycle();
             }
-            if (rowSwiping) {
+            if (rowSwiping && !rightRowSwiping) {
                 if (action == MotionEvent.ACTION_MOVE) {
                     if (swipedRowView != null) {
-                        float clamped = Math.max(-dp(110), Math.min(0f, dx)) * 0.68f;
+                        float clamped = Math.max(-dp(90), Math.min(0f, dx)) * 0.56f;
                         swipedRowView.setTranslationX(clamped);
-                    }
-                    if (swipeHintPill != null && swipedRowPos < streamRows.size()) {
-                        AppEntry targetApp = streamRows.get(swipedRowPos).app;
-                        if (targetApp != null && -dx > dp(24)) {
-                            String pkg = targetApp.component.getPackageName();
-                            List<NotificationHubService.NotifItem> nl = NotificationHubService.allByPkg.get(pkg);
-                            boolean hasClearable = false;
-                            if (nl != null) {
-                                for (NotificationHubService.NotifItem ni : nl) {
-                                    if (ni.isClearable) { hasClearable = true; break; }
-                                }
-                            }
-                            if (hasClearable) {
-                                swipeHintPill.setText("✕  清除该应用通知");
-                            } else {
-                                boolean isFav = getStringList(K_FAVS).contains(targetApp.idKey);
-                                swipeHintPill.setText(isFav ? "★  移出常用应用" : "☆  加入常用应用");
-                            }
-                            swipeHintPill.setVisibility(View.VISIBLE);
-                            swipeHintPill.setAlpha(Math.min(1f, (-dx - dp(20)) / dp(48)));
+                        if (!leftSwipeThresholdTicked && dx < -dp(56)) {
+                            leftSwipeThresholdTicked = true;
+                            swipedRowView.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK,
+                                    HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING);
+                        } else if (leftSwipeThresholdTicked && dx > -dp(46)) {
+                            leftSwipeThresholdTicked = false;
                         }
                     }
                 } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
                     if (swipedRowView != null) {
                         swipedRowView.animate().translationX(0f).setDuration(190).start();
                     }
-                    if (swipeHintPill != null) {
-                        swipeHintPill.setVisibility(View.GONE);
-                    }
-                    if (action == MotionEvent.ACTION_UP && swipedRowPos < streamRows.size()) {
-                        AppEntry targetApp = streamRows.get(swipedRowPos).app;
-                        if (targetApp != null && dx < -dp(68) && targetApp != virtualSettingsApp) {
-                            getWindow().getDecorView().performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
-                            String pkg = targetApp.component.getPackageName();
-                            int cleared = NotificationHubService.cancelAllForPackage(pkg);
-                            if (cleared > 0) {
-                                Toast.makeText(this, "已清除「" + targetApp.label + "」" + cleared + " 条通知", Toast.LENGTH_SHORT).show();
-                            } else {
-                                toggleFavoriteQuickly(targetApp);
-                            }
+                    if (action == MotionEvent.ACTION_UP && targetApp != null && dx < -dp(56)) {
+                        getWindow().getDecorView().performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
+                        String pkg = targetApp.component.getPackageName();
+                        int cleared = NotificationHubService.cancelAllForPackage(pkg);
+                        if (cleared > 0) {
+                            Toast.makeText(this, "已清除「" + targetApp.label + "」" + cleared + " 条通知", Toast.LENGTH_SHORT).show();
                         }
                     }
                     rowSwiping = false;
+                    leftSwipeThresholdTicked = false;
                     swipedRowPos = -1;
                 }
                 return true;
@@ -2405,19 +2247,12 @@ public class MainActivity extends Activity {
         return super.dispatchTouchEvent(ev);
     }
 
-    // ---------- v2.7.0 单手右滑直达 Pop-up（无底栏大胶囊干扰，过阈值单次微震确认） ----------
-    private boolean rightRowSwiping = false;
-    private boolean rightSwipeThresholdTicked = false;
-    private int touchSlopPx = 0;
-
     /**
-     * 列表项右滑手势识别：dx > touchSlop 且 dx > |dy|*2.0（极角隔离，避开纵向滚动与系统边缘手势）。
-     * 触发后接管事件流：列表项以 min(dx*0.4, 48dp) 跟手位移，跨越 56dp 触发一次轻脆微震，松手呼出 Pop-up。
-     *
-     * @return true 表示事件已被右滑手势消费（调用方应直接返回 true）
+     * 列表项右滑直达 Pop-up：支持应用行与文件夹行；dx > touchSlop 且 dx > |dy|*2.0 极角隔离。
      */
-    private boolean handleItemSwipeRight(View itemView, AppEntry appInfo, MotionEvent event) {
-        if (appInfo == null || itemView == null) return false;
+    private boolean handleItemSwipeRight(View itemView, StreamRow row, MotionEvent event) {
+        if (row == null || itemView == null) return false;
+        if (row.app == null && row.type != StreamRow.TYPE_FOLDER) return false;
         int action = event.getActionMasked();
         float dx = event.getRawX() - touchStartX;
         float dy = event.getRawY() - touchStartY;
@@ -2450,602 +2285,22 @@ public class MainActivity extends Activity {
         }
         if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
             itemView.animate().translationX(0f).setDuration(190).start();
-            if (swipeHintPill != null) swipeHintPill.setVisibility(View.GONE);
             boolean trigger = action == MotionEvent.ACTION_UP && dx > dp(56);
             rightRowSwiping = false;
             rightSwipeThresholdTicked = false;
             rowSwiping = false;
             swipedRowPos = -1;
-            if (trigger) {
+            if (trigger && popupController != null) {
                 getWindow().getDecorView().performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK);
-                showAppPopupCard(itemView, appInfo);
+                if (row.type == StreamRow.TYPE_FOLDER) {
+                    popupController.showFolderPopup(itemView, row.folderIdx, false);
+                } else {
+                    popupController.showAppPopup(itemView, row.app, false);
+                }
             }
             return true;
         }
         return true;
-    }
-
-    // ---------- v2.7.0 锚点跟随 Pop-up 浮层（API 31+ 背景模糊 / 软键盘自动避让 / 通知与快捷方式 / 文件夹统一体系） ----------
-    private FrameLayout workspaceRoot;
-    private FrameLayout appPopupScrim;
-
-    private void applyPopupBackdropBlur(boolean enable) {
-        if (Build.VERSION.SDK_INT < 31) return;
-        try {
-            android.graphics.RenderEffect fx = enable
-                    ? android.graphics.RenderEffect.createBlurEffect(
-                            12f * dpUnit, 12f * dpUnit, android.graphics.Shader.TileMode.CLAMP)
-                    : null;
-            if (workspaceMainColumn != null) workspaceMainColumn.setRenderEffect(fx);
-            if (backdropView != null) backdropView.setRenderEffect(fx);
-        } catch (Throwable ignored) {}
-    }
-
-    private void dismissAppPopupCard(boolean animate) {
-        final FrameLayout scrim = appPopupScrim;
-        if (scrim == null) return;
-        appPopupScrim = null;
-        applyPopupBackdropBlur(false);
-        hideSoftKeyboard();
-        final Runnable remove = () -> {
-            ViewGroup p = (ViewGroup) scrim.getParent();
-            if (p != null) p.removeView(scrim);
-        };
-        if (animate) {
-            scrim.animate().alpha(0f).setDuration(120).withEndAction(remove).start();
-        } else {
-            scrim.animate().cancel();
-            remove.run();
-        }
-    }
-
-    private GradientDrawable popupCardBackground() {
-        GradientDrawable g = new GradientDrawable();
-        g.setColor(theme.isLight ? 0xE6F4F5F7 : 0xE61A1C20);       // 微透明、无厚边框、无硬投影
-        g.setCornerRadius(dp(20));
-        g.setStroke(Math.max(1, Math.round(0.5f * dpUnit)), theme.isLight ? 0x66FFFFFF : 0x24FFFFFF); // 0.5dp 高光内轮廓
-        return g;
-    }
-
-    /** 在目标列表项旁弹出与其几何锚定的无边框微卡片：自动上翻避让底部，左缘对齐图标中心 +64dp，右侧留 16dp。 */
-    private void showAppPopupCard(final View anchorView, final AppEntry app) {
-        if (app == null || anchorView == null || workspaceRoot == null) return;
-        if (app == virtualSettingsApp) {
-            openControlCenterSheet();
-            return;
-        }
-        dismissAppPopupCard(false);
-        final FrameLayout root = workspaceRoot;
-        final String pkg = app.component != null ? app.component.getPackageName() : "";
-
-        final LinearLayout content = new LinearLayout(this);
-        content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(dp(14), dp(12), dp(14), dp(8));
-
-        // 1. 头部：图标 + 名称 + 打开
-        LinearLayout hdr = new LinearLayout(this);
-        hdr.setGravity(Gravity.CENTER_VERTICAL);
-        ImageView hIcon = new ImageView(this);
-        hIcon.setImageDrawable(getShapedIcon(app));
-        LinearLayout.LayoutParams hiLp = new LinearLayout.LayoutParams(dp(30), dp(30));
-        hiLp.rightMargin = dp(10);
-        hdr.addView(hIcon, hiLp);
-        TextView hTitle = makeText(app.label, 15.5f, theme.textPrimary, true);
-        hTitle.setSingleLine(true);
-        hTitle.setEllipsize(TextUtils.TruncateAt.END);
-        hdr.addView(hTitle, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        hdr.addView(makeText("打开 ›", 12.5f, theme.accent, true));
-        hdr.setPadding(0, 0, 0, dp(4));
-        hdr.setOnClickListener(v -> {
-            dismissAppPopupCard(true);
-            launchApp(app);
-        });
-        content.addView(hdr);
-
-        // 2. 未读通知摘要（至多 3 条）：右滑 / ✕ 清除，支持内联快捷回复与常规动作胶囊
-        final List<NotificationHubService.NotifItem> notifs = NotificationHubService.getAllByPackage(pkg);
-        if (!notifs.isEmpty()) {
-            LinearLayout nHdr = new LinearLayout(this);
-            nHdr.setGravity(Gravity.CENTER_VERTICAL);
-            TextView nTitle = makeText("💬 未读通知 " + notifs.size(), 11.8f, theme.accent, true);
-            nTitle.setPadding(0, dp(10), 0, dp(4));
-            nHdr.addView(nTitle, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-            TextView clearAll = makeText("全部清除", 11.5f, theme.textSecondary, true);
-            clearAll.setPadding(dp(8), dp(10), 0, dp(4));
-            clearAll.setOnClickListener(v -> {
-                int cleared = NotificationHubService.cancelAllForPackage(pkg);
-                Toast.makeText(this, cleared > 0 ? "已清除全部通知" : "没有可清除的通知", Toast.LENGTH_SHORT).show();
-                dismissAppPopupCard(true);
-            });
-            nHdr.addView(clearAll);
-            content.addView(nHdr);
-
-            int shown = 0;
-            for (NotificationHubService.NotifItem n : notifs) {
-                if (shown++ >= 3) break;
-                LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-                rlp.topMargin = dp(5);
-                content.addView(buildPopupNotifRow(n), rlp);
-            }
-        }
-
-        // 3. 动态快捷方式（API 25+，SecurityException 安全降级）
-        final List<ShortcutInfo> shortcuts = queryPopupShortcuts(app);
-        if (!shortcuts.isEmpty()) {
-            TextView sTitle = makeText("⚡ 快捷方式", 11.8f, theme.accent, true);
-            sTitle.setPadding(0, dp(10), 0, dp(2));
-            content.addView(sTitle);
-            for (final ShortcutInfo sc : shortcuts) {
-                LinearLayout sRow = new LinearLayout(this);
-                sRow.setGravity(Gravity.CENTER_VERTICAL);
-                sRow.setPadding(0, dp(8), 0, dp(8));
-                Drawable sIcon = null;
-                try {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N_MR1 && launcherApps != null) {
-                        sIcon = launcherApps.getShortcutIconDrawable(sc, getResources().getDisplayMetrics().densityDpi);
-                    }
-                } catch (Throwable ignored) {}
-                if (sIcon != null) {
-                    ImageView siv = new ImageView(this);
-                    siv.setImageDrawable(sIcon);
-                    LinearLayout.LayoutParams silp = new LinearLayout.LayoutParams(dp(22), dp(22));
-                    silp.rightMargin = dp(10);
-                    sRow.addView(siv, silp);
-                }
-                TextView sLabel = makeText(String.valueOf(sc.getShortLabel()), 13.5f, theme.textPrimary, false);
-                sLabel.setSingleLine(true);
-                sLabel.setEllipsize(TextUtils.TruncateAt.END);
-                sRow.addView(sLabel, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-                sRow.setOnClickListener(v -> {
-                    dismissAppPopupCard(true);
-                    startPopupShortcut(sc, app);
-                });
-                content.addView(sRow);
-            }
-        }
-
-        // 4. 底部轻量操作
-        LinearLayout footer = new LinearLayout(this);
-        footer.setGravity(Gravity.CENTER_VERTICAL);
-        footer.setPadding(0, dp(8), 0, 0);
-        boolean isFav = getStringList(K_FAVS).contains(app.idKey);
-        TextView favBtn = makeText(isFav ? "★ 移出常用" : "☆ 加入常用", 12.5f, theme.textSecondary, true);
-        favBtn.setPadding(0, dp(6), dp(14), dp(6));
-        favBtn.setOnClickListener(v -> {
-            dismissAppPopupCard(true);
-            toggleFavoriteQuickly(app);
-        });
-        footer.addView(favBtn);
-        footer.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1f));
-        TextView moreBtn = makeText("⋯ 更多", 12.5f, theme.textSecondary, true);
-        moreBtn.setPadding(dp(14), dp(6), 0, dp(6));
-        moreBtn.setOnClickListener(v -> {
-            dismissAppPopupCard(false);
-            showAppActionSheet(app);
-        });
-        footer.addView(moreBtn);
-        content.addView(footer);
-
-        // 卡片容器：圆角裁剪 + 内容过高时可滚动
-        final ScrollView card = new ScrollView(this);
-        card.setVerticalScrollBarEnabled(false);
-        card.setOverScrollMode(View.OVER_SCROLL_NEVER);
-        card.setBackground(popupCardBackground());
-        card.setClipToOutline(true);
-        card.setOutlineProvider(android.view.ViewOutlineProvider.BACKGROUND);
-        card.setClickable(true);
-        card.addView(content, new ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        final FrameLayout scrim = new FrameLayout(this);
-        scrim.setBackgroundColor(theme.isLight ? 0x14000000 : 0x2A000000);
-        scrim.setClickable(true);
-        scrim.setOnClickListener(v -> dismissAppPopupCard(true));
-
-        // 几何锚定：左缘自然贴合应用文本区，右侧距屏幕边缘 16dp；纵向对齐列表项，靠近底部自动上翻，且随软键盘自动避让
-        int rootW = root.getWidth() > 0 ? root.getWidth() : getResources().getDisplayMetrics().widthPixels;
-        int rootH = root.getHeight() > 0 ? root.getHeight() : getResources().getDisplayMetrics().heightPixels;
-        int[] rootLoc = new int[2];
-        int[] aLoc = new int[2];
-        root.getLocationOnScreen(rootLoc);
-        anchorView.getLocationOnScreen(aLoc);
-        int anchorLeft = Math.round(aLoc[0] - anchorView.getTranslationX()) - rootLoc[0];
-        int anchorTop = aLoc[1] - rootLoc[1];
-        int anchorH = Math.max(anchorView.getHeight(), dp(40));
-        int iconCenterX = anchorLeft + dp(20);
-        View iconView = findRowIconView(anchorView);
-        if (iconView != null && iconView.getParent() instanceof View) {
-            iconCenterX = anchorLeft + ((View) iconView.getParent()).getLeft()
-                    + iconView.getLeft() + iconView.getWidth() / 2;
-        }
-
-        int minW = dp(248), maxW = dp(328), margin = dp(16);
-        int left = iconCenterX + dp(32);
-        if (rootW - left - margin < minW) left = rootW - margin - minW;
-        left = Math.max(dp(12), left);
-        int width = Math.max(minW, Math.min(maxW, rootW - left - margin));
-
-        int topInset = currentTopInsetPx, botInset = currentNavBottomPx;
-        try {
-            android.view.WindowInsets wi = root.getRootWindowInsets();
-            if (wi != null) {
-                topInset = wi.getSystemWindowInsetTop();
-                botInset = wi.getSystemWindowInsetBottom();
-            }
-        } catch (Throwable ignored) {}
-        int availTop = topInset + dp(8);
-        int availBottom = rootH - botInset - dp(12);
-        card.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
-                View.MeasureSpec.makeMeasureSpec(Math.max(dp(120), availBottom - availTop), View.MeasureSpec.AT_MOST));
-        final int cardH = card.getMeasuredHeight();
-        int top = anchorTop - dp(6);
-        if (top + cardH > availBottom) {
-            top = anchorTop + anchorH + dp(6) - cardH; // 靠近底部：向上翻转展开
-        }
-        final int finalTop = Math.max(availTop, Math.min(top, availBottom - cardH));
-
-        FrameLayout.LayoutParams clp = new FrameLayout.LayoutParams(width, cardH);
-        clp.leftMargin = left;
-        clp.topMargin = finalTop;
-        scrim.addView(card, clp);
-
-        // 软键盘弹出（点击内联快捷回复）时自动上移卡片，避免输入框被键盘遮挡
-        final int safeTopLimit = availTop;
-        final int totalRootH = rootH;
-        scrim.setOnApplyWindowInsetsListener((sv, insets) -> {
-            int imeBot = 0;
-            if (Build.VERSION.SDK_INT >= 30) {
-                try {
-                    imeBot = insets.getInsets(android.view.WindowInsets.Type.ime()).bottom;
-                } catch (Throwable ignored) {}
-            } else {
-                imeBot = insets.getSystemWindowInsetBottom();
-            }
-            int cardBottom = finalTop + cardH;
-            int visibleBottom = totalRootH - imeBot - dp(12);
-            float shiftY = 0f;
-            if (imeBot > dp(100) && cardBottom > visibleBottom) {
-                shiftY = -Math.min(cardBottom - visibleBottom, Math.max(0, finalTop - safeTopLimit));
-            }
-            card.animate().translationY(shiftY).setDuration(150).start();
-            return insets;
-        });
-
-        root.addView(scrim, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        appPopupScrim = scrim;
-        applyPopupBackdropBlur(true);
-
-        // 入场：从锚点左缘轻微内推 + 缩放 + 渐显
-        card.setPivotX(0f);
-        card.setPivotY(Math.max(0f, Math.min(cardH, anchorTop + anchorH * 0.5f - finalTop)));
-        card.setScaleX(0.92f);
-        card.setScaleY(0.92f);
-        card.setTranslationX(-dp(12));
-        card.setAlpha(0f);
-        scrim.setAlpha(0f);
-        scrim.animate().alpha(1f).setDuration(150).start();
-        card.animate().alpha(1f).scaleX(1f).scaleY(1f).translationX(0f).setDuration(180)
-                .setInterpolator(new android.view.animation.DecelerateInterpolator(1.6f)).start();
-    }
-
-    /** 原生 Niagara 风格文件夹锚点 Pop-up：原地展开带应用图标与未读点的微卡片。 */
-    private void openFolderPopup(final View anchorView, final int folderIdx) {
-        if (anchorView == null || workspaceRoot == null) {
-            openFolderSheet(folderIdx);
-            return;
-        }
-        final JSONObject fo = getFoldersArray().optJSONObject(folderIdx);
-        if (fo == null) return;
-        dismissAppPopupCard(false);
-
-        final FrameLayout root = workspaceRoot;
-        final LinearLayout content = new LinearLayout(this);
-        content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(dp(14), dp(12), dp(14), dp(10));
-
-        LinearLayout hdr = new LinearLayout(this);
-        hdr.setGravity(Gravity.CENTER_VERTICAL);
-        hdr.setPadding(0, 0, 0, dp(6));
-        TextView title = makeText(fo.optString("name", "文件夹"), 15.5f, theme.textPrimary, true);
-        title.setSingleLine(true);
-        title.setEllipsize(TextUtils.TruncateAt.END);
-        hdr.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        TextView editBtn = makeText("管理", 12.2f, theme.accent, true);
-        editBtn.setPadding(dp(10), dp(4), dp(2), dp(4));
-        editBtn.setOnClickListener(v -> {
-            dismissAppPopupCard(false);
-            promptEditFolder(folderIdx);
-        });
-        hdr.addView(editBtn);
-        content.addView(hdr);
-
-        JSONArray apps = fo.optJSONArray("apps");
-        int count = 0;
-        if (apps != null) {
-            for (int i = 0; i < apps.length(); i++) {
-                final AppEntry a = findAppByKey(apps.optString(i));
-                if (a == null) continue;
-                count++;
-                LinearLayout aRow = new LinearLayout(this);
-                aRow.setOrientation(LinearLayout.HORIZONTAL);
-                aRow.setGravity(Gravity.CENTER_VERTICAL);
-                aRow.setPadding(dp(2), dp(7), dp(4), dp(7));
-
-                ImageView aiv = new ImageView(this);
-                aiv.setImageDrawable(getShapedIcon(a));
-                LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(dp(32), dp(32));
-                ilp.rightMargin = dp(12);
-                aRow.addView(aiv, ilp);
-
-                LinearLayout col = new LinearLayout(this);
-                col.setOrientation(LinearLayout.VERTICAL);
-                TextView nameTv = makeText(a.label, 14.2f, theme.textPrimary, false);
-                nameTv.setSingleLine(true);
-                nameTv.setEllipsize(TextUtils.TruncateAt.END);
-                col.addView(nameTv);
-
-                String pkg = a.component != null ? a.component.getPackageName() : "";
-                NotificationHubService.NotifItem notif = prefs.getBoolean(K_INLINE_NOTIF, true)
-                        ? NotificationHubService.latestByPkg.get(pkg) : null;
-                if (notif != null) {
-                    String preview = (notif.title.isEmpty() ? "" : notif.title + "：") + notif.text;
-                    TextView subTv = makeText(preview, 11.4f, theme.textSecondary, false);
-                    subTv.setSingleLine(true);
-                    subTv.setEllipsize(TextUtils.TruncateAt.END);
-                    col.addView(subTv);
-                }
-                aRow.addView(col, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
-                if (notif == null && NotificationHubService.activePackages.contains(pkg)) {
-                    View dot = new View(this);
-                    GradientDrawable dbg = new GradientDrawable();
-                    dbg.setShape(GradientDrawable.OVAL);
-                    dbg.setColor(theme.accent);
-                    dot.setBackground(dbg);
-                    LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(dp(6), dp(6));
-                    dlp.leftMargin = dp(8);
-                    aRow.addView(dot, dlp);
-                }
-
-                aRow.setOnClickListener(v -> {
-                    dismissAppPopupCard(true);
-                    launchApp(a, v);
-                });
-                aRow.setOnLongClickListener(v -> {
-                    dismissAppPopupCard(false);
-                    showAppActionSheet(a);
-                    return true;
-                });
-                content.addView(aRow);
-            }
-        }
-        if (count == 0) {
-            TextView empty = makeText("文件夹为空，点击右上角「管理」添加应用", 12.5f, theme.textSecondary, false);
-            empty.setPadding(0, dp(8), 0, dp(8));
-            content.addView(empty);
-        }
-
-        final ScrollView card = new ScrollView(this);
-        card.setVerticalScrollBarEnabled(false);
-        card.setOverScrollMode(View.OVER_SCROLL_NEVER);
-        card.setBackground(popupCardBackground());
-        card.setClipToOutline(true);
-        card.setOutlineProvider(android.view.ViewOutlineProvider.BACKGROUND);
-        card.setClickable(true);
-        card.addView(content, new ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        final FrameLayout scrim = new FrameLayout(this);
-        scrim.setBackgroundColor(theme.isLight ? 0x14000000 : 0x2A000000);
-        scrim.setClickable(true);
-        scrim.setOnClickListener(v -> dismissAppPopupCard(true));
-
-        int rootW = root.getWidth() > 0 ? root.getWidth() : getResources().getDisplayMetrics().widthPixels;
-        int rootH = root.getHeight() > 0 ? root.getHeight() : getResources().getDisplayMetrics().heightPixels;
-        int[] rootLoc = new int[2];
-        int[] aLoc = new int[2];
-        root.getLocationOnScreen(rootLoc);
-        anchorView.getLocationOnScreen(aLoc);
-        int anchorTop = aLoc[1] - rootLoc[1];
-        int anchorH = Math.max(anchorView.getHeight(), dp(44));
-
-        int margin = dp(16);
-        int width = Math.max(dp(248), Math.min(dp(320), rootW - dp(64)));
-        int left = Math.max(dp(18), Math.min(rootW - margin - width, dp(42)));
-        int availTop = currentTopInsetPx + dp(12);
-        int availBottom = rootH - currentNavBottomPx - dp(16);
-        card.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
-                View.MeasureSpec.makeMeasureSpec(Math.max(dp(120), availBottom - availTop), View.MeasureSpec.AT_MOST));
-        int cardH = card.getMeasuredHeight();
-        int top = anchorTop - dp(6);
-        if (top + cardH > availBottom) top = anchorTop + anchorH + dp(6) - cardH;
-        top = Math.max(availTop, Math.min(top, availBottom - cardH));
-
-        FrameLayout.LayoutParams clp = new FrameLayout.LayoutParams(width, cardH);
-        clp.leftMargin = left;
-        clp.topMargin = top;
-        scrim.addView(card, clp);
-        root.addView(scrim, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        appPopupScrim = scrim;
-        applyPopupBackdropBlur(true);
-
-        card.setPivotX(0f);
-        card.setPivotY(Math.max(0f, Math.min(cardH, anchorTop + anchorH * 0.5f - top)));
-        card.setScaleX(0.92f);
-        card.setScaleY(0.92f);
-        card.setTranslationX(-dp(10));
-        card.setAlpha(0f);
-        scrim.setAlpha(0f);
-        scrim.animate().alpha(1f).setDuration(150).start();
-        card.animate().alpha(1f).scaleX(1f).scaleY(1f).translationX(0f).setDuration(180)
-                .setInterpolator(new android.view.animation.DecelerateInterpolator(1.6f)).start();
-    }
-
-    /** 单条通知微卡片：标题/摘要/相对时间、✕ 与右滑清除、常规动作胶囊、内联快捷回复。 */
-    private View buildPopupNotifRow(final NotificationHubService.NotifItem n) {
-        final LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.VERTICAL);
-        row.setBackground(theme.subtleGhostPill(dpUnit, 14));
-        row.setPadding(dp(11), dp(8), dp(8), dp(8));
-
-        LinearLayout top = new LinearLayout(this);
-        top.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout col = new LinearLayout(this);
-        col.setOrientation(LinearLayout.VERTICAL);
-        if (n.title != null && !n.title.isEmpty()) {
-            TextView t = makeText(n.title, 12.8f, theme.textPrimary, true);
-            t.setSingleLine(true);
-            t.setEllipsize(TextUtils.TruncateAt.END);
-            col.addView(t);
-        }
-        if (n.text != null && !n.text.isEmpty()) {
-            TextView t = makeText(n.text, 12.2f, theme.textPrimary, false);
-            t.setMaxLines(2);
-            t.setEllipsize(TextUtils.TruncateAt.END);
-            col.addView(t);
-        }
-        col.addView(makeText(NotificationHubService.formatRelativeTime(n.postTime), 10.6f, theme.textSecondary, false));
-        top.addView(col, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
-        if (n.isClearable) {
-            TextView x = makeText("✕", 13.5f, theme.textSecondary, true);
-            x.setPadding(dp(10), dp(4), dp(6), dp(4));
-            x.setOnClickListener(v -> dismissPopupNotifRow(row, n));
-            top.addView(x);
-        }
-        row.addView(top);
-
-        // 常规 Action 胶囊（标记已读 / 暂停 …）
-        if (n.plainActions != null && !n.plainActions.isEmpty()) {
-            LinearLayout caps = new LinearLayout(this);
-            caps.setPadding(0, dp(6), 0, 0);
-            for (final Notification.Action act : n.plainActions) {
-                TextView cap = makeText(String.valueOf(act.title), 11.6f, theme.accent, true);
-                cap.setBackground(theme.accentGlowPill(dpUnit, 12));
-                cap.setPadding(dp(10), dp(4), dp(10), dp(4));
-                cap.setSingleLine(true);
-                cap.setEllipsize(TextUtils.TruncateAt.END);
-                cap.setOnClickListener(v -> {
-                    try {
-                        act.actionIntent.send();
-                        Toast.makeText(this, "已执行：" + act.title, Toast.LENGTH_SHORT).show();
-                    } catch (Throwable t) {
-                        Toast.makeText(this, "操作已失效", Toast.LENGTH_SHORT).show();
-                    }
-                    dismissAppPopupCard(true);
-                });
-                LinearLayout.LayoutParams capLp = new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-                capLp.rightMargin = dp(6);
-                caps.addView(cap, capLp);
-            }
-            row.addView(caps);
-        }
-
-        // 内联快捷回复（RemoteInput）
-        if (NotificationHubService.getQuickReplyAction(n) != null) {
-            LinearLayout replyRow = new LinearLayout(this);
-            replyRow.setGravity(Gravity.CENTER_VERTICAL);
-            replyRow.setPadding(0, dp(4), 0, 0);
-            final EditText replyIn = new EditText(this);
-            replyIn.setHint("直接回复…");
-            replyIn.setTextColor(theme.textPrimary);
-            replyIn.setHintTextColor((theme.textSecondary & 0x00FFFFFF) | 0x88000000);
-            replyIn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.8f);
-            replyIn.setSingleLine(true);
-            replyIn.setBackground(null);
-            replyIn.setPadding(0, dp(4), dp(6), dp(4));
-            replyRow.addView(replyIn, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-            TextView send = makeText("发送", 12.5f, theme.accent, true);
-            send.setPadding(dp(8), dp(4), dp(6), dp(4));
-            send.setOnClickListener(v -> {
-                String msg = replyIn.getText().toString().trim();
-                if (msg.isEmpty()) return;
-                if (NotificationHubService.sendQuickReply(this, n, msg)) {
-                    Toast.makeText(this, "已发送回复", Toast.LENGTH_SHORT).show();
-                    dismissAppPopupCard(true);
-                } else {
-                    Toast.makeText(this, "回复失败，请进入应用回复", Toast.LENGTH_SHORT).show();
-                }
-            });
-            replyRow.addView(send);
-            row.addView(replyRow);
-        }
-
-        if (n.contentIntent != null) {
-            row.setOnClickListener(v -> {
-                try {
-                    launchedExternalApp = true;
-                    n.contentIntent.send();
-                    dismissAppPopupCard(true);
-                } catch (Throwable t) {
-                    launchedExternalApp = false;
-                }
-            });
-        }
-        if (n.isClearable) attachSwipeToDismiss(row, n);
-        return row;
-    }
-
-    private void dismissPopupNotifRow(final View row, NotificationHubService.NotifItem n) {
-        if (!NotificationHubService.dismissNotification(n.key)) {
-            Toast.makeText(this, "无法清除该通知", Toast.LENGTH_SHORT).show();
-            row.animate().translationX(0f).alpha(1f).setDuration(160).start();
-            return;
-        }
-        row.animate().translationX(row.getWidth()).alpha(0f).setDuration(160).withEndAction(() -> {
-            ViewGroup p = (ViewGroup) row.getParent();
-            if (p != null) p.removeView(row);
-        }).start();
-    }
-
-    /** 通知微条目右滑清除（同样使用 touchSlop + 极角隔离，避免与卡片纵向滚动冲突）。 */
-    private void attachSwipeToDismiss(final View row, final NotificationHubService.NotifItem n) {
-        final float[] down = new float[2];
-        final boolean[] swiping = new boolean[1];
-        row.setOnTouchListener((v, e) -> {
-            int a = e.getActionMasked();
-            if (a == MotionEvent.ACTION_DOWN) {
-                down[0] = e.getRawX();
-                down[1] = e.getRawY();
-                swiping[0] = false;
-                return false;
-            }
-            float dx = e.getRawX() - down[0];
-            float dy = e.getRawY() - down[1];
-            if (a == MotionEvent.ACTION_MOVE) {
-                if (!swiping[0]) {
-                    if (touchSlopPx <= 0) touchSlopPx = ViewConfiguration.get(this).getScaledTouchSlop();
-                    if (dx > touchSlopPx && dx > Math.abs(dy) * 2.0f) {
-                        swiping[0] = true;
-                        v.setPressed(false);
-                        v.cancelLongPress();
-                        if (v.getParent() != null) v.getParent().requestDisallowInterceptTouchEvent(true);
-                    }
-                }
-                if (swiping[0]) {
-                    v.setTranslationX(Math.max(0f, dx));
-                    v.setAlpha(1f - Math.min(0.6f, dx / dp(180)));
-                    return true;
-                }
-                return false;
-            }
-            if (a == MotionEvent.ACTION_UP || a == MotionEvent.ACTION_CANCEL) {
-                if (swiping[0]) {
-                    swiping[0] = false;
-                    if (a == MotionEvent.ACTION_UP && dx > dp(72)) {
-                        dismissPopupNotifRow(v, n);
-                    } else {
-                        v.animate().translationX(0f).alpha(1f).setDuration(160).start();
-                    }
-                    return true;
-                }
-            }
-            return false;
-        });
     }
 
     /** 弹层展示用快捷方式：仅启用项，按 rank 排序，至多 4 个。 */
@@ -3085,7 +2340,7 @@ public class MainActivity extends Activity {
         } else {
             favs.add(app.idKey);
             putStringList(K_FAVS, favs);
-            Toast.makeText(this, "★ 已加入第一页常用应用：" + app.label, Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "已加入第一页常用应用：" + app.label, Toast.LENGTH_SHORT).show();
         }
         rebuildStreamRows();
     }
@@ -3095,15 +2350,13 @@ public class MainActivity extends Activity {
         public boolean onDoubleTapEvent(MotionEvent e) {
             if (e.getActionMasked() != MotionEvent.ACTION_UP) return false;
             if (searchActive || !prefs.getBoolean(K_DOUBLE_TAP_LOCK, true)) return false;
-            // 🚀 核心优化：在首页模式下，无论是常用应用区域、应用右侧空白、还是顶栏，双击均可 100% 熄屏！
-            // 仅在「全部应用抽屉」模式下按在应用实体行时让位给列表滚动交互
             if (touchDownOnAppRow) return false;
             int w = getWindow().getDecorView().getWidth();
             if (e.getRawX() > w - dp(38) || e.getRawX() < dp(32)) return false;
             long now = SystemClock.uptimeMillis();
             if (now - lastDoubleTapLock < 2000) return true;
             lastDoubleTapLock = now;
-            cancelPendingAppLaunch(); // 确保双击时绝对不误开任何被点到的应用
+            cancelPendingAppLaunch();
             wasOnHomeBeforeLock = true;
             launchedExternalApp = false;
             uiHandler.postDelayed(MainActivity.this::triggerScreenLock, 50);
@@ -3119,7 +2372,6 @@ public class MainActivity extends Activity {
             float dy = e2.getY() - e1.getY();
             float dx = e2.getX() - e1.getX();
 
-            // 在第二页（全部应用）或搜索模式下，非边缘中央区域的水平快滑可快速返回第一页常用应用
             if ((inAllAppsMode || searchActive) && !rowSwiping
                     && Math.abs(dx) > dp(64) && Math.abs(dx) > Math.abs(dy) * 1.5f) {
                 returnToHomeFavorites();
@@ -3133,7 +2385,6 @@ public class MainActivity extends Activity {
                     returnToHomeFavorites();
                     return true;
                 }
-                // 第一页左手/中央下拉默认直接唤出极速搜索（可在控制中心切换为拉开通知栏）
                 if (prefs.getBoolean(K_PULL_DOWN_SEARCH, true)) {
                     openInstantSearch();
                     return true;
@@ -3143,11 +2394,8 @@ public class MainActivity extends Activity {
                     return true;
                 }
             }
-            if (dy < 0 && touchDownInHeader) {
-                openInstantSearch();
-                return true;
-            }
-            if (dy < 0 && !inAllAppsMode && !searchActive) {
+            // 首页一体流：列表已到底（或单屏未满）时向上轻扫无缝进入全部应用，内容溢出时优先顺滑滚动首页流
+            if (dy < 0 && !inAllAppsMode && !searchActive && isListAtBottom()) {
                 switchStreamMode(true);
                 return true;
             }
@@ -3158,7 +2406,17 @@ public class MainActivity extends Activity {
     private boolean isListAtTop() {
         if (streamListView == null || streamListView.getChildCount() == 0) return true;
         return streamListView.getFirstVisiblePosition() == 0
-                && streamListView.getChildAt(0).getTop() >= streamListView.getPaddingTop();
+                && streamListView.getChildAt(0).getTop() >= streamListView.getPaddingTop() - dp(2);
+    }
+
+    private boolean isListAtBottom() {
+        if (streamListView == null || streamListView.getChildCount() == 0) return true;
+        int lastVis = streamListView.getLastVisiblePosition();
+        int total = streamListView.getCount();
+        if (lastVis < total - 1) return false;
+        View lastChild = streamListView.getChildAt(streamListView.getChildCount() - 1);
+        return lastChild == null
+                || lastChild.getBottom() <= streamListView.getHeight() - streamListView.getPaddingBottom() + dp(4);
     }
 
     private void triggerScreenLock() {
@@ -3552,7 +2810,6 @@ public class MainActivity extends Activity {
                 letterTopApp.clear();
                 autoPopulateInitialFavoritesIfEmpty();
                 rebuildStreamRows();
-                refreshRecentDock();
                 writeDiskAppCache();
                 if (pendingReloadApps) {
                     pendingReloadApps = false;
@@ -3578,8 +2835,8 @@ public class MainActivity extends Activity {
         for (String kw : preferredKeywords) {
             for (AppEntry a : allApps) {
                 if (seeded.contains(a.idKey)) continue;
-                String pkg = a.component.getPackageName().toLowerCase(Locale.ROOT);
-                String lb = a.label.toLowerCase(Locale.ROOT);
+                String pkg = a.component != null ? a.component.getPackageName().toLowerCase(Locale.ROOT) : "";
+                String lb = a.label != null ? a.label.toLowerCase(Locale.ROOT) : "";
                 if (pkg.contains(kw) || lb.contains(kw)) {
                     seeded.add(a.idKey);
                     break;
@@ -3597,25 +2854,125 @@ public class MainActivity extends Activity {
         prefs.edit().putBoolean("auto_fav_seeded", true).apply();
     }
 
+    private void syncWaveBarSymbolsAndData(Set<String> hiddenSet) {
+        availableLetters.clear();
+        letterTopPreview.clear();
+        letterTopApp.clear();
+        for (AppEntry a : allApps) {
+            if (hiddenSet.contains(a.idKey)) continue;
+            char g = a.groupChar;
+            availableLetters.add(g);
+            if (!letterTopPreview.containsKey(g)) {
+                letterTopPreview.put(g, a.label);
+                letterTopApp.put(g, a);
+            }
+        }
+        availableLetters.add('★');
+
+        String syms;
+        if (prefs.getBoolean(K_WAVE_ADAPTIVE_ALPHA, true)) {
+            StringBuilder sb = new StringBuilder();
+            sb.append('★');
+            for (int i = 1; i < WAVE_SYMBOLS.length(); i++) {
+                char c = WAVE_SYMBOLS.charAt(i);
+                if (availableLetters.contains(c)) sb.append(c);
+            }
+            syms = sb.length() > 1 ? sb.toString() : WAVE_SYMBOLS;
+        } else {
+            syms = WAVE_SYMBOLS;
+        }
+
+        Set<Character> availCopy = new HashSet<>(availableLetters);
+        Map<Character, String> previewCopy = new HashMap<>(letterTopPreview);
+        if (rightWaveBar != null) {
+            rightWaveBar.setSymbols(syms);
+            rightWaveBar.setAvailableData(availCopy, previewCopy);
+        }
+        if (leftGhostWaveBar != null) {
+            leftGhostWaveBar.setSymbols(syms);
+            leftGhostWaveBar.setAvailableData(availCopy, previewCopy);
+        }
+    }
+
+    private List<AppEntry> computeSurfacedUnreadApps(Set<String> hiddenSet, Map<String, AppEntry> byKey,
+                                                     Set<String> homeKeys, Set<String> homePkgs) {
+        if (!prefs.getBoolean(K_SURFACE_UNREAD_HOME, true)) return Collections.emptyList();
+        List<String> notifPkgs = NotificationHubService.getNotifiedPackagesOrderedByTime();
+        if (notifPkgs.isEmpty()) return Collections.emptyList();
+        List<AppEntry> out = new ArrayList<>();
+        Set<String> addedPkgs = new HashSet<>();
+        for (String pkg : notifPkgs) {
+            if (pkg == null || homePkgs.contains(pkg) || !addedPkgs.add(pkg)) continue;
+            AppEntry match = null;
+            for (AppEntry a : allApps) {
+                if (a.isShortcut || a.component == null) continue;
+                if (hiddenSet.contains(a.idKey) || homeKeys.contains(a.idKey)) continue;
+                if (pkg.equals(a.component.getPackageName())) {
+                    match = a;
+                    break;
+                }
+            }
+            if (match != null) {
+                out.add(match);
+                if (out.size() >= 4) break;
+            }
+        }
+        return out;
+    }
+
+    private List<String> computeSurfacedUnreadKeys() {
+        Set<String> hiddenSet = new HashSet<>(getStringList(K_HIDDEN));
+        Map<String, AppEntry> byKey = new HashMap<>();
+        for (AppEntry a : allApps) byKey.put(a.idKey, a);
+        Set<String> homeKeys = new HashSet<>();
+        Set<String> homePkgs = new HashSet<>();
+        for (String fk : getStringList(K_FAVS)) {
+            if (hiddenSet.contains(fk)) continue;
+            AppEntry a = byKey.get(fk);
+            if (a != null) {
+                homeKeys.add(a.idKey);
+                if (a.component != null) homePkgs.add(a.component.getPackageName());
+            }
+        }
+        JSONArray folders = getFoldersArray();
+        for (int i = 0; i < folders.length(); i++) {
+            JSONObject fo = folders.optJSONObject(i);
+            JSONArray apps = fo != null ? fo.optJSONArray("apps") : null;
+            if (apps == null) continue;
+            for (int j = 0; j < apps.length(); j++) {
+                String k = apps.optString(j);
+                AppEntry ma = byKey.get(k);
+                if (ma != null) {
+                    homeKeys.add(ma.idKey);
+                    if (ma.component != null) homePkgs.add(ma.component.getPackageName());
+                }
+            }
+        }
+        List<AppEntry> apps = computeSurfacedUnreadApps(hiddenSet, byKey, homeKeys, homePkgs);
+        if (apps.isEmpty()) return Collections.emptyList();
+        List<String> keys = new ArrayList<>(apps.size());
+        for (AppEntry a : apps) keys.add(a.idKey);
+        return keys;
+    }
+
     private void rebuildStreamRows() {
         streamRows.clear();
         letterRowIndex.clear();
 
-        String query = searchInput == null ? "" : searchInput.getText().toString().trim().toLowerCase(Locale.ROOT);
+        String rawQuery = searchInput == null ? "" : searchInput.getText().toString().trim();
+        String query = rawQuery.toLowerCase(Locale.ROOT);
         Set<String> hiddenSet = new HashSet<>(getStringList(K_HIDDEN));
         Map<String, AppEntry> byKey = new HashMap<>();
         for (AppEntry a : allApps) byKey.put(a.idKey, a);
 
         if (searchActive) {
             if (!query.isEmpty()) {
-                // v2.7.0 贴底单手搜索排序：最佳匹配与计算结果置于列表底端，紧邻底部搜索栏与大拇指
+                // 贴底单手搜索排序：最佳匹配与计算结果置于列表底端，紧邻底部搜索栏与大拇指
                 String calcOut = QuickCalcEngine.evaluateOrConvert(query);
-                String rawSearchText = searchInput == null ? "" : searchInput.getText().toString().trim();
-                if (!rawSearchText.isEmpty() && calcOut == null) {
-                    streamRows.add(new StreamRow(StreamRow.TYPE_WEB_SEARCH, rawSearchText, null));
+                if (!rawQuery.isEmpty() && calcOut == null) {
+                    streamRows.add(new StreamRow(StreamRow.TYPE_WEB_SEARCH, rawQuery, null));
                 }
                 String cleanQ = query.replace(" ", "");
-                // 匹配应用内快捷方式（如：扫一扫 / 付款码 / 乘车码）
                 if (cleanQ.length() >= 2 && !cachedShortcuts.isEmpty()) {
                     int scCount = 0;
                     for (ShortcutSearchEntry sc : cachedShortcuts) {
@@ -3648,47 +3005,49 @@ public class MainActivity extends Activity {
                     streamRows.add(new StreamRow(StreamRow.TYPE_CALC_RESULT, calcOut, null));
                 }
             } else {
-                // 搜索框刚打开尚未输入时，将最近使用置于最底部紧贴拇指，上方衔接常用与全部应用
+                // 清爽空搜索态：仅呈最近使用/常用推荐（Top 6，自底向上紧贴拇指），绝不倾倒全部应用
                 Set<String> shown = new HashSet<>();
-                List<AppEntry> recentEntries = new ArrayList<>();
-                List<String> recents = getStringList(K_RECENT_KEYS);
-                for (String rk : recents) {
+                List<AppEntry> picks = new ArrayList<>();
+                boolean hasRecents = false;
+                for (String rk : getStringList(K_RECENT_KEYS)) {
                     AppEntry a = byKey.get(rk);
                     if (a != null && !hiddenSet.contains(rk) && shown.add(rk)) {
-                        recentEntries.add(a);
-                        if (recentEntries.size() >= 5) break;
+                        picks.add(a);
+                        hasRecents = true;
+                        if (picks.size() >= 6) break;
                     }
                 }
-                List<AppEntry> otherEntries = new ArrayList<>();
-                for (String fk : getStringList(K_FAVS)) {
-                    AppEntry a = byKey.get(fk);
-                    if (a != null && !hiddenSet.contains(fk) && shown.add(fk)) {
-                        otherEntries.add(a);
+                if (picks.size() < 6) {
+                    for (String pkg : GestureLockService.getActivePackages()) {
+                        AppEntry a = findAppByPackage(pkg);
+                        if (a != null && !hiddenSet.contains(a.idKey) && shown.add(a.idKey)) {
+                            picks.add(a);
+                            hasRecents = true;
+                            if (picks.size() >= 6) break;
+                        }
                     }
                 }
-                for (AppEntry a : allApps) {
-                    if (!hiddenSet.contains(a.idKey) && shown.add(a.idKey)) {
-                        otherEntries.add(a);
+                if (picks.size() < 6) {
+                    for (String fk : getStringList(K_FAVS)) {
+                        AppEntry a = byKey.get(fk);
+                        if (a != null && !hiddenSet.contains(fk) && shown.add(fk)) {
+                            picks.add(a);
+                            if (picks.size() >= 6) break;
+                        }
                     }
                 }
-                if (!otherEntries.isEmpty()) {
-                    streamRows.add(new StreamRow(StreamRow.TYPE_SECTION, "★ 常用与全部应用", null));
-                    for (int i = otherEntries.size() - 1; i >= 0; i--) {
-                        streamRows.add(new StreamRow(StreamRow.TYPE_ALL_APP, null, otherEntries.get(i)));
-                    }
-                }
-                if (!recentEntries.isEmpty()) {
-                    streamRows.add(new StreamRow(StreamRow.TYPE_SECTION, "⚡ 最近使用", null));
-                    for (int i = recentEntries.size() - 1; i >= 0; i--) {
-                        streamRows.add(new StreamRow(StreamRow.TYPE_ALL_APP, null, recentEntries.get(i)));
+                if (!picks.isEmpty()) {
+                    streamRows.add(new StreamRow(StreamRow.TYPE_SECTION, hasRecents ? "最近使用" : "常用推荐", null));
+                    for (int i = picks.size() - 1; i >= 0; i--) {
+                        streamRows.add(new StreamRow(StreamRow.TYPE_ALL_APP, null, picks.get(i)));
                     }
                 }
             }
             rightWaveBar.setVisibility(View.GONE);
             leftGhostWaveBar.setVisibility(View.GONE);
             streamAdapter.notifyDataSetChanged();
-            if (!streamRows.isEmpty() && streamListView != null) {
-                streamListView.setSelection(streamRows.size() - 1);
+            if (streamListView != null && streamListView.getCount() > 0) {
+                streamListView.setSelection(streamListView.getCount() - 1);
             }
             return;
         }
@@ -3698,31 +3057,24 @@ public class MainActivity extends Activity {
         leftGhostWaveBar.setBackSwipePreferred(inAllAppsMode || searchActive);
         leftGhostWaveBar.setVisibility(searchActive ? View.GONE : View.VISIBLE);
 
-        if (availableLetters.isEmpty()) {
-            for (AppEntry a : allApps) {
-                if (hiddenSet.contains(a.idKey)) continue;
-                char g = a.groupChar;
-                availableLetters.add(g);
-                if (!letterTopPreview.containsKey(g)) {
-                    letterTopPreview.put(g, a.label);
-                    letterTopApp.put(g, a);
-                }
-            }
-            availableLetters.add('★');
-        }
+        syncWaveBarSymbolsAndData(hiddenSet);
 
         if (!inAllAppsMode && !searchActive) {
-            // 首页主态：经典 Niagara 纵向常用应用列表流 + 首页原生文件夹行
+            // 首页主态：常用应用流 + 原生文件夹行 + 动态未读通知浮现区
             List<String> favs = getStringList(K_FAVS);
             if (favs.isEmpty()) {
                 autoPopulateInitialFavoritesIfEmpty();
                 favs = getStringList(K_FAVS);
             }
+            Set<String> homeKeys = new HashSet<>();
+            Set<String> homePkgs = new HashSet<>();
             for (String fk : favs) {
                 if (hiddenSet.contains(fk)) continue;
                 AppEntry a = byKey.get(fk);
                 if (a != null) {
                     streamRows.add(new StreamRow(StreamRow.TYPE_FAV_APP, null, a));
+                    homeKeys.add(a.idKey);
+                    if (a.component != null) homePkgs.add(a.component.getPackageName());
                 }
             }
             JSONArray folders = getFoldersArray();
@@ -3730,16 +3082,38 @@ public class MainActivity extends Activity {
                 JSONObject fo = folders.optJSONObject(i);
                 if (fo != null) {
                     streamRows.add(new StreamRow(StreamRow.TYPE_FOLDER, fo.optString("name", "文件夹"), null, i));
+                    JSONArray fApps = fo.optJSONArray("apps");
+                    if (fApps != null) {
+                        for (int j = 0; j < fApps.length(); j++) {
+                            AppEntry ma = byKey.get(fApps.optString(j));
+                            if (ma != null) {
+                                homeKeys.add(ma.idKey);
+                                if (ma.component != null) homePkgs.add(ma.component.getPackageName());
+                            }
+                        }
+                    }
                 }
             }
-            rightWaveBar.setAvailableData(new HashSet<>(availableLetters), new HashMap<>(letterTopPreview));
-            leftGhostWaveBar.setAvailableData(new HashSet<>(availableLetters), new HashMap<>(letterTopPreview));
+
+            List<AppEntry> surfaced = computeSurfacedUnreadApps(hiddenSet, byKey, homeKeys, homePkgs);
+            if (!surfaced.isEmpty()) {
+                List<String> sKeys = new ArrayList<>(surfaced.size());
+                streamRows.add(new StreamRow(StreamRow.TYPE_SURFACED_DIVIDER, null, null));
+                for (AppEntry sa : surfaced) {
+                    sKeys.add(sa.idKey);
+                    streamRows.add(new StreamRow(StreamRow.TYPE_FAV_APP, null, sa));
+                }
+                lastSurfacedKeys = sKeys;
+            } else {
+                lastSurfacedKeys = Collections.emptyList();
+            }
+
             streamAdapter.notifyDataSetChanged();
             applyOneHandedListPadding();
             return;
         }
 
-        // 🚀 用户专属需求：「在所有应用内增加一条同一首字母的应用 按使用频次排序」
+        // 全部应用流：保留同首字母内按使用频次竖列降序排列
         final JSONObject launchCounts = getLaunchCountsJson();
         Map<Character, List<AppEntry>> grouped = new LinkedHashMap<>();
         for (AppEntry a : allApps) {
@@ -3757,11 +3131,9 @@ public class MainActivity extends Activity {
             char g = entry.getKey();
             List<AppEntry> list = entry.getValue();
 
-            // 1. 字母标头 (例如 "A")
             letterRowIndex.put(g, streamRows.size());
             streamRows.add(new StreamRow(StreamRow.TYPE_SECTION, String.valueOf(g), null));
 
-            // 2. 🚀「竖列按使用频率排序即可 不要横列」：每个字母分组内的所有应用按使用频次降序排列（最高频排在最上方）
             List<AppEntry> sortedList = new ArrayList<>(list);
             Collections.sort(sortedList, (x, y) -> {
                 int ux = launchCounts.optInt(x.idKey, 0);
@@ -3779,14 +3151,12 @@ public class MainActivity extends Activity {
             streamRows.add(new StreamRow(StreamRow.TYPE_ALL_APP, null, virtualSettingsApp));
         }
 
-        rightWaveBar.setAvailableData(new HashSet<>(availableLetters), new HashMap<>(letterTopPreview));
-        leftGhostWaveBar.setAvailableData(new HashSet<>(availableLetters), new HashMap<>(letterTopPreview));
         streamAdapter.notifyDataSetChanged();
         applyOneHandedListPadding();
     }
 
     private int matchRank(AppEntry a, String q) {
-        String lb = a.label.toLowerCase(Locale.ROOT);
+        String lb = a.label != null ? a.label.toLowerCase(Locale.ROOT) : "";
         if (lb.startsWith(q)) return 0;
         if (a.iniPy.startsWith(q)) return 1;
         if (a.t9Digits.startsWith(q)) return 2;
@@ -3794,11 +3164,57 @@ public class MainActivity extends Activity {
         if (lb.contains(q)) return 4;
         if (a.iniPy.contains(q)) return 5;
         if (a.fullPy.contains(q)) return 6;
-        if (a.component.getPackageName().toLowerCase(Locale.ROOT).contains(q)) return 7;
+        if (a.component != null && a.component.getPackageName().toLowerCase(Locale.ROOT).contains(q)) return 7;
         return -1;
     }
 
-    // ---------- 第一页常用应用栏与全部应用流渲染适配器 ----------
+    /** 搜索命中词高亮：支持直接子串匹配与拼音首字母位置映射高亮（theme.accent + 粗体）。 */
+    private CharSequence buildHighlightedLabel(String label, String cleanQuery) {
+        if (label == null || cleanQuery == null || cleanQuery.isEmpty()) return label;
+        String lower = label.toLowerCase(Locale.ROOT);
+        int idx = lower.indexOf(cleanQuery);
+        if (idx >= 0) {
+            SpannableString ss = new SpannableString(label);
+            int end = Math.min(label.length(), idx + cleanQuery.length());
+            ss.setSpan(new ForegroundColorSpan(theme.accent), idx, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            ss.setSpan(new StyleSpan(Typeface.BOLD), idx, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            return ss;
+        }
+        // 拼音首字母精确映射高亮（例如输入 wx 高亮「微信」）
+        StringBuilder iniBuf = new StringBuilder();
+        List<Integer> charPos = new ArrayList<>();
+        boolean wordStart = true;
+        for (int i = 0; i < label.length(); i++) {
+            char ch = label.charAt(i);
+            String py = PinyinEngine.charToPinyin(ch);
+            if (py != null && !py.isEmpty()) {
+                iniBuf.append(py.charAt(0));
+                charPos.add(i);
+                wordStart = true;
+            } else if (Character.isLetterOrDigit(ch)) {
+                if (wordStart || Character.isUpperCase(ch)) {
+                    iniBuf.append(Character.toLowerCase(ch));
+                    charPos.add(i);
+                }
+                wordStart = false;
+            } else {
+                wordStart = true;
+            }
+        }
+        int iniIdx = iniBuf.toString().indexOf(cleanQuery);
+        if (iniIdx >= 0 && iniIdx + cleanQuery.length() <= charPos.size()) {
+            SpannableString ss = new SpannableString(label);
+            for (int k = 0; k < cleanQuery.length(); k++) {
+                int p = charPos.get(iniIdx + k);
+                ss.setSpan(new ForegroundColorSpan(theme.accent), p, p + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                ss.setSpan(new StyleSpan(Typeface.BOLD), p, p + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            }
+            return ss;
+        }
+        return label;
+    }
+
+    // ---------- 第一页常用应用流与全部应用流渲染适配器 ----------
     private float getRowSpacingMultiplier() {
         int d = prefs.getInt(K_ROW_DENSITY, 1);
         return d == 0 ? 0.72f : d == 2 ? 1.35f : 1.0f;
@@ -3808,11 +3224,11 @@ public class MainActivity extends Activity {
         @Override public int getCount() { return streamRows.size(); }
         @Override public Object getItem(int position) { return streamRows.get(position); }
         @Override public long getItemId(int position) { return position; }
-        @Override public int getViewTypeCount() { return 9; }
+        @Override public int getViewTypeCount() { return StreamRow.VIEW_TYPE_COUNT; }
         @Override public int getItemViewType(int position) { return streamRows.get(position).type; }
         @Override public boolean isEnabled(int position) {
             int t = streamRows.get(position).type;
-            return t != StreamRow.TYPE_SECTION && t != StreamRow.TYPE_FAV_FOOTER && t != StreamRow.TYPE_GROUP_ROW;
+            return t != StreamRow.TYPE_SECTION && t != StreamRow.TYPE_SURFACED_DIVIDER;
         }
 
         @Override
@@ -3822,32 +3238,91 @@ public class MainActivity extends Activity {
                 resetItemWaveTransform(convertView);
             }
 
+            if (row.type == StreamRow.TYPE_SURFACED_DIVIDER) {
+                LinearLayout wrap = convertView instanceof LinearLayout && "surf_div".equals(convertView.getTag())
+                        ? (LinearLayout) convertView : null;
+                if (wrap == null) {
+                    wrap = new LinearLayout(MainActivity.this);
+                    wrap.setTag("surf_div");
+                    wrap.setOrientation(LinearLayout.HORIZONTAL);
+                    wrap.setGravity(Gravity.CENTER_VERTICAL);
+                    wrap.setPadding(dp(4), dp(10), dp(4), dp(6));
+
+                    View bar = new View(MainActivity.this);
+                    GradientDrawable bg = new GradientDrawable();
+                    bg.setColor((theme.accent & 0x00FFFFFF) | (theme.isLight ? 0x48000000 : 0x62000000));
+                    bg.setCornerRadius(dp(1f));
+                    bar.setBackground(bg);
+                    wrap.addView(bar, new LinearLayout.LayoutParams(dp(26), Math.max(2, dp(1.5f))));
+                }
+                return wrap;
+            }
+
             if (row.type == StreamRow.TYPE_CALC_RESULT) {
-                TextView tv = convertView instanceof TextView ? (TextView) convertView : new TextView(MainActivity.this);
-                tv.setText("🧮  = " + row.text + "   （点按复制）");
+                LinearLayout pill = convertView instanceof LinearLayout && "calc_row".equals(convertView.getTag())
+                        ? (LinearLayout) convertView : null;
+                TextView tv;
+                if (pill == null) {
+                    pill = new LinearLayout(MainActivity.this);
+                    pill.setTag("calc_row");
+                    pill.setOrientation(LinearLayout.HORIZONTAL);
+                    pill.setGravity(Gravity.CENTER_VERTICAL);
+                    pill.setBackground(theme.accentGlowPill(dpUnit, 18));
+                    pill.setPadding(dp(14), dp(11), dp(14), dp(11));
+
+                    SearchGlyphView ic = new SearchGlyphView(MainActivity.this, SearchGlyphView.IC_CALC, theme.accent, dpUnit);
+                    LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(dp(18), dp(18));
+                    ilp.rightMargin = dp(10);
+                    pill.addView(ic, ilp);
+
+                    tv = new TextView(MainActivity.this);
+                    pill.addView(tv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+                } else {
+                    tv = (TextView) pill.getChildAt(1);
+                }
+                tv.setText("= " + row.text + "   · 点击复制");
                 tv.setTextColor(theme.accent);
                 tv.setTypeface(Typeface.create(typeface, Typeface.BOLD));
-                tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp(18));
-                tv.setBackground(theme.accentGlowPill(dpUnit, 18));
-                tv.setPadding(dp(16), dp(12), dp(16), dp(12));
-                return tv;
+                tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp(17));
+                return pill;
             }
 
             if (row.type == StreamRow.TYPE_WEB_SEARCH) {
-                TextView tv = convertView instanceof TextView ? (TextView) convertView : new TextView(MainActivity.this);
-                tv.setText("🌐  在浏览器中搜索「" + row.text + "」");
+                LinearLayout pill = convertView instanceof LinearLayout && "web_row".equals(convertView.getTag())
+                        ? (LinearLayout) convertView : null;
+                TextView tv;
+                if (pill == null) {
+                    pill = new LinearLayout(MainActivity.this);
+                    pill.setTag("web_row");
+                    pill.setOrientation(LinearLayout.HORIZONTAL);
+                    pill.setGravity(Gravity.CENTER_VERTICAL);
+                    pill.setBackground(theme.subtleGhostPill(dpUnit, 16));
+                    pill.setPadding(dp(14), dp(11), dp(14), dp(11));
+
+                    SearchGlyphView ic = new SearchGlyphView(MainActivity.this, SearchGlyphView.IC_GLOBE, theme.accent, dpUnit);
+                    LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(dp(17), dp(17));
+                    ilp.rightMargin = dp(10);
+                    pill.addView(ic, ilp);
+
+                    tv = new TextView(MainActivity.this);
+                    tv.setSingleLine(true);
+                    tv.setEllipsize(TextUtils.TruncateAt.END);
+                    pill.addView(tv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+                } else {
+                    tv = (TextView) pill.getChildAt(1);
+                }
+                tv.setText("使用 " + getCurrentSearchEngineName() + " 搜索「" + row.text + "」");
                 tv.setTextColor(theme.textPrimary);
                 tv.setTypeface(Typeface.create(typeface, Typeface.BOLD));
-                tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp(14.2f));
-                tv.setBackground(theme.subtleGhostPill(dpUnit, 16));
-                tv.setPadding(dp(16), dp(12), dp(16), dp(12));
-                tv.setOnClickListener(v -> {
-                    String url = "https://www.baidu.com/s?wd=" + Uri.encode(row.text);
-                    startIntentSafely(new Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
-                    closeInstantSearch();
-                });
-                return tv;
+                tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp(13.8f));
+                final String qText = row.text;
+                pill.setOnClickListener(v -> openWebSearch(qText));
+                return pill;
             }
+
+            final String cleanSearchQ = (searchActive && searchInput != null)
+                    ? searchInput.getText().toString().trim().toLowerCase(Locale.ROOT).replace(" ", "")
+                    : "";
 
             if (row.type == StreamRow.TYPE_SHORTCUT_RESULT) {
                 LinearLayout rowView = convertView instanceof LinearLayout && "sc_row".equals(convertView.getTag())
@@ -3884,26 +3359,16 @@ public class MainActivity extends Activity {
                     t2 = (TextView) col.getChildAt(1);
                 }
                 if (row.app != null) iv.setImageDrawable(getShapedIcon(row.app));
-                t1.setText("⚡ " + row.text);
+                t1.setText(cleanSearchQ.isEmpty() ? row.text : buildHighlightedLabel(row.text, cleanSearchQ));
                 t1.setTextColor(theme.textPrimary);
                 t1.setTypeface(typeface);
                 t1.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp(14.5f));
-                t2.setText(row.app != null ? (row.app.label + " · 快捷功能") : "应用快捷功能");
+                t2.setText(row.app != null ? (row.app.label + " · 快捷方式") : "应用快捷方式");
                 t2.setTextColor(theme.accent);
                 t2.setTypeface(typeface);
                 t2.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp(11.5f));
                 rowView.setOnClickListener(v -> {
-                    if (row.shortcut != null) {
-                        try {
-                            launchedExternalApp = true;
-                            launcherApps.startShortcut(row.shortcut, null, null);
-                            hideSoftKeyboard();
-                            uiHandler.postDelayed(() -> { if (searchActive) closeInstantSearch(); }, 350);
-                        } catch (Throwable t) {
-                            launchedExternalApp = false;
-                            if (row.app != null) launchApp(row.app);
-                        }
-                    }
+                    if (row.shortcut != null) startSearchShortcut(row.shortcut, row.app);
                 });
                 return rowView;
             }
@@ -3955,12 +3420,15 @@ public class MainActivity extends Activity {
 
                 JSONObject fo = getFoldersArray().optJSONObject(row.folderIdx);
                 JSONArray appsArr = fo != null ? fo.optJSONArray("apps") : null;
+                boolean tapLaunchFirst = fo != null && fo.optBoolean("tapLaunchFirst", false);
                 List<Drawable> memberIcons = new ArrayList<>();
+                AppEntry firstValidApp = null;
                 boolean anyUnread = false;
                 int cnt = appsArr != null ? appsArr.length() : 0;
                 for (int i = 0; i < cnt; i++) {
                     AppEntry ma = findAppByKey(appsArr.optString(i));
                     if (ma != null) {
+                        if (firstValidApp == null) firstValidApp = ma;
                         if (memberIcons.size() < 4) {
                             Drawable d = getShapedIcon(ma);
                             if (d != null) memberIcons.add(d);
@@ -3992,7 +3460,7 @@ public class MainActivity extends Activity {
                 t1.setTypeface(typeface);
                 t1.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp(15.5f));
                 t1.setShadowLayer(theme.isLight ? dp(1.0f) : dp(2.2f), 0f, dp(0.6f), theme.isLight ? 0x20FFFFFF : 0x48000000);
-                t2.setText(cnt + " 个应用 · 胶囊文件夹");
+                t2.setText(cnt + " 个应用" + (tapLaunchFirst ? " · 点开首项" : ""));
                 t2.setTextColor(theme.textSecondary);
                 t2.setTypeface(typeface);
                 t2.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp(11.4f));
@@ -4008,147 +3476,51 @@ public class MainActivity extends Activity {
                     rowView.setBackground(null);
                 }
                 final int fIdx = row.folderIdx;
-                rowView.setOnClickListener(v -> openFolderPopup(v, fIdx));
-                rowView.setOnLongClickListener(v -> { promptEditFolder(fIdx); return true; });
+                final AppEntry fFirst = firstValidApp;
+                final boolean fTapFirst = tapLaunchFirst;
+                rowView.setOnClickListener(v -> {
+                    if (fTapFirst && fFirst != null) {
+                        launchApp(fFirst, v);
+                    } else if (popupController != null) {
+                        popupController.showFolderPopup(v, fIdx, false);
+                    }
+                });
+                rowView.setOnLongClickListener(v -> {
+                    v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+                    if (popupController != null) popupController.showFolderPopup(v, fIdx, true);
+                    return true;
+                });
                 return rowView;
-            }
-
-            // 第一页底部优化：双胶囊对称布局（左下角改为「⭐ 选择常用应用」，右侧「⠿ 全部应用 (N) ⌃」，彻底消除右侧挤成小点的第3胶囊）
-            if (row.type == StreamRow.TYPE_FAV_FOOTER) {
-                LinearLayout footer = new LinearLayout(MainActivity.this);
-                footer.setOrientation(LinearLayout.HORIZONTAL);
-                footer.setGravity(Gravity.CENTER_VERTICAL);
-                footer.setPadding(dp(2), dp(16), dp(6), dp(12));
-
-                TextView pickFavPill = makeText("编辑常用", 12.6f, theme.accent, true);
-                pickFavPill.setGravity(Gravity.CENTER);
-                pickFavPill.setBackground(theme.accentGlowPill(dpUnit, 14));
-                pickFavPill.setPadding(dp(12), dp(9f), dp(12), dp(9f));
-                pickFavPill.setSingleLine(true);
-                pickFavPill.setEllipsize(TextUtils.TruncateAt.END);
-                pickFavPill.setOnClickListener(v -> showPickFavoritesDialog());
-                pickFavPill.setOnLongClickListener(v -> { showReorderFavoritesDialog(); return true; });
-
-                TextView allAppsPill = makeText("全部应用 · " + allApps.size(), 12.6f, theme.textPrimary, false);
-                allAppsPill.setGravity(Gravity.CENTER);
-                allAppsPill.setBackground(theme.unifiedStatusBarBg(dpUnit));
-                allAppsPill.setPadding(dp(12), dp(9f), dp(12), dp(9f));
-                allAppsPill.setSingleLine(true);
-                allAppsPill.setEllipsize(TextUtils.TruncateAt.END);
-                allAppsPill.setOnClickListener(v -> switchStreamMode(true));
-
-                LinearLayout.LayoutParams lpFav = new LinearLayout.LayoutParams(
-                        0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-                lpFav.rightMargin = dp(10);
-                footer.addView(pickFavPill, lpFav);
-
-                LinearLayout.LayoutParams lpAll = new LinearLayout.LayoutParams(
-                        0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-                footer.addView(allAppsPill, lpAll);
-                return footer;
             }
 
             if (row.type == StreamRow.TYPE_SECTION) {
                 TextView tv = convertView instanceof TextView ? (TextView) convertView : new TextView(MainActivity.this);
                 tv.setText(row.text);
                 tv.setTextColor(theme.textPrimary);
-                boolean isHighlighted = highlightedGroup != 0 && row.text.length() == 1 && row.text.charAt(0) == highlightedGroup;
+                boolean isHighlighted = highlightedGroup != 0 && row.text != null && row.text.length() == 1 && row.text.charAt(0) == highlightedGroup;
                 tv.setAlpha(highlightedGroup == 0 ? 0.65f : (isHighlighted ? 1.0f : 0.25f));
                 tv.setTypeface(Typeface.create(typeface, Typeface.BOLD));
-                tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp(13.5f));
-                tv.setPadding(dp(4), dp(15 * getRowSpacingMultiplier()), 0, dp(4));
+                tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp(13.0f));
+                tv.setPadding(dp(4), dp(14 * getRowSpacingMultiplier()), 0, dp(4));
                 return tv;
-            }
-
-            // 🚀 用户专属需求：「在所有应用内增加一条同一首字母的应用 按使用频次排序」
-            if (row.type == StreamRow.TYPE_GROUP_ROW) {
-                HorizontalScrollView hsv = (convertView instanceof HorizontalScrollView && "group_recents_row".equals(convertView.getTag()))
-                        ? (HorizontalScrollView) convertView : null;
-                LinearLayout container;
-                if (hsv == null) {
-                    hsv = new HorizontalScrollView(MainActivity.this);
-                    hsv.setTag("group_recents_row");
-                    hsv.setHorizontalScrollBarEnabled(false);
-                    hsv.setOverScrollMode(View.OVER_SCROLL_NEVER);
-                    hsv.setClipToPadding(false);
-                    hsv.setPadding(dp(2), dp(2), dp(24), dp(8));
-
-                    container = new LinearLayout(MainActivity.this);
-                    container.setOrientation(LinearLayout.HORIZONTAL);
-                    container.setGravity(Gravity.CENTER_VERTICAL);
-                    hsv.addView(container, new FrameLayout.LayoutParams(
-                            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-                } else {
-                    container = (LinearLayout) hsv.getChildAt(0);
-                    container.removeAllViews();
-                }
-
-                if (row.groupApps != null) {
-                    for (final AppEntry app : row.groupApps) {
-                        LinearLayout cell = new LinearLayout(MainActivity.this);
-                        cell.setOrientation(LinearLayout.VERTICAL);
-                        cell.setGravity(Gravity.CENTER_HORIZONTAL);
-                        cell.setPadding(dp(6), dp(3), dp(6), dp(3));
-
-                        ImageView iv = new ImageView(MainActivity.this);
-                        iv.setImageDrawable(getShapedIcon(app));
-                        LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(dp(36), dp(36));
-                        cell.addView(iv, ilp);
-
-                        TextView tv = new TextView(MainActivity.this);
-                        tv.setText(app.label);
-                        tv.setTextColor(theme.textPrimary);
-                        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp(11.0f));
-                        tv.setTypeface(typeface);
-                        tv.setSingleLine(true);
-                        tv.setEllipsize(TextUtils.TruncateAt.END);
-                        tv.setMaxWidth(dp(68));
-                        tv.setGravity(Gravity.CENTER);
-                        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(
-                                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-                        tlp.topMargin = dp(3);
-                        cell.addView(tv, tlp);
-
-                        cell.setOnClickListener(v -> {
-                            if (isWaveScrubbing) return;
-                            v.animate().scaleX(0.90f).scaleY(0.90f).setDuration(60)
-                                    .withEndAction(() -> v.animate().scaleX(1f).scaleY(1f).setDuration(90).start())
-                                    .start();
-                            if (!inAllAppsMode && !searchActive) {
-                                scheduleAppLaunch(app);
-                            } else {
-                                launchApp(app);
-                            }
-                        });
-                        cell.setOnLongClickListener(v -> {
-                            if (isWaveScrubbing) return true;
-                            v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
-                            showAppActionSheet(app);
-                            return true;
-                        });
-
-                        container.addView(cell);
-                    }
-                }
-                return hsv;
             }
 
             boolean isFav = (row.type == StreamRow.TYPE_FAV_APP);
             LinearLayout outerWrap;
             LinearLayout cardRow;
-            View accentRail;
             ImageView iconView;
             TextView titleView, subNotifView;
+            View popupIndicator;
             View unreadBadge;
 
             if (convertView instanceof LinearLayout && "app_row_v2".equals(convertView.getTag())) {
                 outerWrap = (LinearLayout) convertView;
                 cardRow = (LinearLayout) outerWrap.getChildAt(0);
-                accentRail = cardRow.getChildAt(0);
-                iconView = (ImageView) cardRow.getChildAt(1);
-                LinearLayout textCol = (LinearLayout) cardRow.getChildAt(2);
+                iconView = (ImageView) cardRow.getChildAt(0);
+                LinearLayout textCol = (LinearLayout) cardRow.getChildAt(1);
                 titleView = (TextView) textCol.getChildAt(0);
                 subNotifView = (TextView) textCol.getChildAt(1);
+                popupIndicator = cardRow.getChildAt(2);
                 unreadBadge = cardRow.getChildAt(3);
             } else {
                 outerWrap = new LinearLayout(MainActivity.this);
@@ -4158,10 +3530,6 @@ public class MainActivity extends Activity {
                 cardRow = new LinearLayout(MainActivity.this);
                 cardRow.setOrientation(LinearLayout.HORIZONTAL);
                 cardRow.setGravity(Gravity.CENTER_VERTICAL);
-
-                accentRail = new View(MainActivity.this);
-                LinearLayout.LayoutParams railLp = new LinearLayout.LayoutParams(dp(3.2f), dp(24f));
-                railLp.rightMargin = dp(10);
 
                 iconView = new ImageView(MainActivity.this);
                 LinearLayout textCol = new LinearLayout(MainActivity.this);
@@ -4180,22 +3548,27 @@ public class MainActivity extends Activity {
                 textCol.addView(titleView);
                 textCol.addView(subNotifView);
 
+                popupIndicator = new PopupChevronView(MainActivity.this, theme.textSecondary, dpUnit);
+                LinearLayout.LayoutParams chevLp = new LinearLayout.LayoutParams(dp(10), dp(12));
+                chevLp.leftMargin = dp(6);
+
                 unreadBadge = new View(MainActivity.this);
                 GradientDrawable dotBg = new GradientDrawable();
                 dotBg.setShape(GradientDrawable.OVAL);
                 dotBg.setColor(theme.accent);
                 unreadBadge.setBackground(dotBg);
 
-                cardRow.addView(accentRail, railLp);
                 cardRow.addView(iconView);
                 cardRow.addView(textCol, new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+                cardRow.addView(popupIndicator, chevLp);
                 LinearLayout.LayoutParams dotLp = new LinearLayout.LayoutParams(dp(7), dp(7));
                 dotLp.leftMargin = dp(8);
                 cardRow.addView(unreadBadge, dotLp);
 
+                final LinearLayout rowAnchor = outerWrap;
                 cardRow.setOnClickListener(v -> {
-                    if (isWaveScrubbing || (android.os.SystemClock.uptimeMillis() - lastWaveReleaseMs) < 220L) {
+                    if (isWaveScrubbing || (SystemClock.uptimeMillis() - lastWaveReleaseMs) < 220L) {
                         return;
                     }
                     Object tag = v.getTag();
@@ -4210,7 +3583,9 @@ public class MainActivity extends Activity {
                     Object tag = v.getTag();
                     if (!(tag instanceof AppEntry)) return true;
                     v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
-                    showAppActionSheet((AppEntry) tag);
+                    if (popupController != null) {
+                        popupController.showAppPopup(rowAnchor, (AppEntry) tag, true);
+                    }
                     return true;
                 });
 
@@ -4222,7 +3597,7 @@ public class MainActivity extends Activity {
             cardRow.setTag(app);
 
             boolean showIcons = prefs.getBoolean(K_SHOW_ICONS, true);
-            int iconBaseDp = isFav ? 40 : 35; // 首页常用图标精致 40dp，视觉比例更协调
+            int iconBaseDp = isFav ? 40 : 35;
             int iconSize = dp(iconBaseDp * Math.min(textScale, 1.15f));
             int iconRightMargin = dp(isFav ? 15 : 13);
             ViewGroup.LayoutParams curIlp = iconView.getLayoutParams();
@@ -4249,27 +3624,26 @@ public class MainActivity extends Activity {
                     0f,
                     dp(0.6f),
                     theme.isLight ? 0x20FFFFFF : 0x48000000);
-            titleView.setText(app.label);
-            String pkg = app.component.getPackageName();
+            titleView.setText(cleanSearchQ.isEmpty() ? app.label : buildHighlightedLabel(app.label, cleanSearchQ));
+
+            String pkg = app.component != null ? app.component.getPackageName() : "";
             boolean useFavCards = isFav && prefs.getBoolean(K_FAV_CARDS, false);
-            boolean useFavRail = isFav && prefs.getBoolean(K_FAV_RAIL, true);
-            boolean hasUnread = NotificationHubService.activePackages.contains(pkg);
+            boolean hasUnread = !pkg.isEmpty() && NotificationHubService.activePackages.contains(pkg);
+            boolean hasPopupChildren = isFav && hasAppPopupChildren(app.idKey);
             int screenW = getResources().getDisplayMetrics().widthPixels;
-            int reservedW = dp(38 + 24 + (useFavRail ? 14 : 0) + (showIcons ? (iconBaseDp * Math.min(textScale, 1.15f) + 14) : 0)
-                    + (useFavCards ? 28 : 12) + (hasUnread ? 15 : 0));
+            int reservedW = dp(38 + 24 + (showIcons ? (iconBaseDp * Math.min(textScale, 1.15f) + 14) : 0)
+                    + (useFavCards ? 28 : 12) + (hasUnread ? 15 : 0) + (hasPopupChildren ? 16 : 0));
             int availTextW = Math.max(dp(210), screenW - reservedW);
             titleView.setMaxWidth(availTextW);
             subNotifView.setMaxWidth(availTextW);
 
             outerWrap.setAlpha(isDimmed ? 0.30f : 1.0f);
 
-            NotificationHubService.NotifItem notif = prefs.getBoolean(K_INLINE_NOTIF, true)
+            NotificationHubService.NotifItem notif = (!pkg.isEmpty() && prefs.getBoolean(K_INLINE_NOTIF, true))
                     ? NotificationHubService.latestByPkg.get(pkg) : null;
-            Integer notifCountObj = NotificationHubService.countByPkg.get(pkg);
+            Integer notifCountObj = !pkg.isEmpty() ? NotificationHubService.countByPkg.get(pkg) : null;
             int notifCount = notifCountObj != null ? notifCountObj : 0;
             boolean hasNotif = (notif != null);
-
-            accentRail.setVisibility(View.GONE);
 
             if (hasNotif) {
                 String extraCount = notifCount > 1 ? (" · +" + (notifCount - 1)) : "";
@@ -4283,6 +3657,8 @@ public class MainActivity extends Activity {
                 subNotifView.setVisibility(View.GONE);
             }
 
+            // 已挂载 App Pop-up 子应用的首页行展示极克制微弱指示小箭头
+            popupIndicator.setVisibility(hasPopupChildren ? View.VISIBLE : View.GONE);
             // 已有内联通知摘要时不再重复叠加圆点，保持原生 Niagara 视觉克制
             unreadBadge.setVisibility((hasUnread && !hasNotif) ? View.VISIBLE : View.GONE);
 
@@ -4293,13 +3669,103 @@ public class MainActivity extends Activity {
                 cardRow.setPadding(dp(10), vPad, dp(14), vPad);
                 outerWrap.setPadding(0, dp(2.2f * mul), dp(4), dp(2.2f * mul));
             } else {
-                // 无卡片模式下不因未读通知改变 padding/背景，确保所有常用应用图标绝对左对齐
                 cardRow.setBackground(null);
                 int vPad = dp((isFav ? 8.5f : 6.0f) * mul);
                 cardRow.setPadding(dp(2), vPad, dp(12), vPad);
                 outerWrap.setPadding(0, 0, 0, 0);
             }
             return outerWrap;
+        }
+    }
+
+    /** 极克制 App Pop-up 微指示小箭头（仅在首页已挂载子应用集合的行尾显示）。 */
+    private static final class PopupChevronView extends View {
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Path path = new Path();
+
+        PopupChevronView(Context ctx, int color, float dp) {
+            super(ctx);
+            paint.setColor(color);
+            paint.setAlpha(112);
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(1.3f * dp);
+            paint.setStrokeCap(Paint.Cap.ROUND);
+            paint.setStrokeJoin(Paint.Join.ROUND);
+        }
+
+        @Override
+        protected void onDraw(Canvas c) {
+            float w = getWidth(), h = getHeight();
+            float cx = w * 0.5f, cy = h * 0.5f;
+            float dx = w * 0.22f, dy = h * 0.26f;
+            path.reset();
+            path.moveTo(cx - dx, cy - dy);
+            path.lineTo(cx + dx, cy);
+            path.lineTo(cx - dx, cy + dy);
+            c.drawPath(path, paint);
+        }
+    }
+
+    /** 搜索栏与搜索结果行极简线性矢量图标（零 Emoji）。 */
+    private static final class SearchGlyphView extends View {
+        static final int IC_SEARCH = 0;
+        static final int IC_CLIPBOARD = 1;
+        static final int IC_CLOSE = 2;
+        static final int IC_CALC = 3;
+        static final int IC_GLOBE = 4;
+
+        private final int type;
+        private final float dp;
+        private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final RectF r = new RectF();
+
+        SearchGlyphView(Context ctx, int type, int color, float dp) {
+            super(ctx);
+            this.type = type;
+            this.dp = dp;
+            p.setColor(color);
+            p.setStyle(Paint.Style.STROKE);
+            p.setStrokeWidth(1.5f * dp);
+            p.setStrokeCap(Paint.Cap.ROUND);
+            p.setStrokeJoin(Paint.Join.ROUND);
+        }
+
+        @Override
+        protected void onDraw(Canvas c) {
+            float w = getWidth(), h = getHeight();
+            float cx = w * 0.5f, cy = h * 0.5f;
+            float u = Math.min(w, h) * 0.36f;
+
+            switch (type) {
+                case IC_SEARCH:
+                    c.drawCircle(cx - u * 0.18f, cy - u * 0.18f, u * 0.68f, p);
+                    c.drawLine(cx + u * 0.30f, cy + u * 0.30f, cx + u * 0.92f, cy + u * 0.92f, p);
+                    break;
+                case IC_CLIPBOARD:
+                    r.set(cx - u * 0.78f, cy - u * 0.68f, cx + u * 0.78f, cy + u * 0.92f);
+                    c.drawRoundRect(r, 2f * dp, 2f * dp, p);
+                    r.set(cx - u * 0.38f, cy - u * 0.95f, cx + u * 0.38f, cy - u * 0.50f);
+                    c.drawRoundRect(r, 1.2f * dp, 1.2f * dp, p);
+                    break;
+                case IC_CALC:
+                    r.set(cx - u * 0.85f, cy - u * 0.95f, cx + u * 0.85f, cy + u * 0.95f);
+                    c.drawRoundRect(r, 2.2f * dp, 2.2f * dp, p);
+                    c.drawLine(cx - u * 0.45f, cy - u * 0.45f, cx + u * 0.45f, cy - u * 0.45f, p);
+                    c.drawLine(cx - u * 0.45f, cy + u * 0.12f, cx + u * 0.45f, cy + u * 0.12f, p);
+                    c.drawLine(cx - u * 0.45f, cy + u * 0.52f, cx + u * 0.45f, cy + u * 0.52f, p);
+                    break;
+                case IC_GLOBE:
+                    c.drawCircle(cx, cy, u * 0.92f, p);
+                    r.set(cx - u * 0.44f, cy - u * 0.92f, cx + u * 0.44f, cy + u * 0.92f);
+                    c.drawOval(r, p);
+                    c.drawLine(cx - u * 0.90f, cy, cx + u * 0.90f, cy, p);
+                    break;
+                case IC_CLOSE:
+                default:
+                    c.drawLine(cx - u * 0.68f, cy - u * 0.68f, cx + u * 0.68f, cy + u * 0.68f, p);
+                    c.drawLine(cx + u * 0.68f, cy - u * 0.68f, cx - u * 0.68f, cy + u * 0.68f, p);
+                    break;
+            }
         }
     }
 
@@ -4910,21 +4376,6 @@ public class MainActivity extends Activity {
         return btn;
     }
 
-    private TextView makeToggleSheetButton(String prefix, boolean active, String onLabel, String offLabel, final Runnable onClick) {
-        String text = prefix + "：" + (active ? onLabel : offLabel);
-        TextView btn = makeText(text, 12.6f, active ? theme.accent : theme.textPrimary, active);
-        btn.setGravity(Gravity.CENTER);
-        btn.setBackground(active ? theme.accentGlowPill(dpUnit, 15) : theme.sheetTileCard(dpUnit, 15));
-        btn.setPadding(dp(10), dp(11.5f), dp(10), dp(11.5f));
-        btn.setMaxLines(2);
-        btn.setEllipsize(TextUtils.TruncateAt.END);
-        btn.setOnClickListener(v -> {
-            v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
-            onClick.run();
-        });
-        return btn;
-    }
-
     private void addGridButtons(LinearLayout parent, List<TextView> buttons, int cols) {
         LinearLayout row = null;
         for (int i = 0; i < buttons.size(); i++) {
@@ -4954,200 +4405,9 @@ public class MainActivity extends Activity {
         parent.addView(tv);
     }
 
-    private void showAppActionSheet(final AppEntry app) {
-        if (app == virtualSettingsApp) {
-            openControlCenterSheet();
-            return;
-        }
-        final LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        final Dialog[] holder = new Dialog[1];
-        final Runnable dismiss = () -> { if (holder[0] != null) holder[0].dismiss(); };
-
-        LinearLayout hdr = new LinearLayout(this);
-        hdr.setGravity(Gravity.CENTER_VERTICAL);
-        ImageView ic = new ImageView(this);
-        ic.setImageDrawable(getShapedIcon(app));
-        LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(dp(48), dp(48));
-        ilp.rightMargin = dp(14);
-        hdr.addView(ic, ilp);
-
-        LinearLayout titleCol = new LinearLayout(this);
-        titleCol.setOrientation(LinearLayout.VERTICAL);
-        titleCol.addView(makeText(app.label, 18, theme.textPrimary, true));
-        int launches = getLaunchCountsJson().optInt(app.idKey, 0);
-        titleCol.addView(makeText("累计启动 " + launches + " 次 · " + app.component.getPackageName(), 11.5f, theme.textSecondary, false));
-        hdr.addView(titleCol, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
-        TextView openBtn = makeSheetButton("打开", () -> { dismiss.run(); launchApp(app); });
-        openBtn.setPadding(dp(16), dp(9), dp(16), dp(9));
-        hdr.addView(openBtn);
-        box.addView(hdr);
-
-        String pkg = app.component != null ? app.component.getPackageName() : "";
-        final List<NotificationHubService.NotifItem> notifs = NotificationHubService.allByPkg.get(pkg);
-        if (notifs != null && !notifs.isEmpty()) {
-            LinearLayout nHdr = new LinearLayout(this);
-            nHdr.setGravity(Gravity.CENTER_VERTICAL);
-            TextView nTitle = makeText("💬 应用通知 (" + notifs.size() + ")", 12.5f, theme.accent, true);
-            nTitle.setPadding(dp(4), dp(16), 0, dp(2));
-            nHdr.addView(nTitle, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-            TextView clearAllBtn = makeText("全部清除", 11.8f, theme.textSecondary, true);
-            clearAllBtn.setPadding(dp(8), dp(14), dp(4), dp(2));
-            clearAllBtn.setOnClickListener(v -> {
-                NotificationHubService.cancelAllForPackage(pkg);
-                Toast.makeText(this, "已清除全部通知", Toast.LENGTH_SHORT).show();
-                dismiss.run();
-            });
-            nHdr.addView(clearAllBtn);
-            box.addView(nHdr);
-
-            for (final NotificationHubService.NotifItem notif : notifs) {
-                LinearLayout nCard = new LinearLayout(this);
-                nCard.setOrientation(LinearLayout.VERTICAL);
-                nCard.setBackground(theme.glassCard(dpUnit, 16));
-                nCard.setPadding(dp(14), dp(10), dp(12), dp(10));
-
-                LinearLayout topN = new LinearLayout(this);
-                topN.setGravity(Gravity.CENTER_VERTICAL);
-                LinearLayout textN = new LinearLayout(this);
-                textN.setOrientation(LinearLayout.VERTICAL);
-                if (!notif.title.isEmpty()) textN.addView(makeText(notif.title, 13.8f, theme.textPrimary, true));
-                textN.addView(makeText(notif.text, 13.0f, theme.textPrimary, false));
-                topN.addView(textN, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
-                if (notif.isClearable) {
-                    TextView xBtn = makeText("✕", 14f, theme.textSecondary, true);
-                    xBtn.setGravity(Gravity.CENTER);
-                    xBtn.setPadding(dp(8), dp(4), dp(4), dp(4));
-                    xBtn.setOnClickListener(v -> {
-                        NotificationHubService.cancelByKey(notif.key);
-                        nCard.setVisibility(View.GONE);
-                    });
-                    topN.addView(xBtn);
-                }
-                nCard.addView(topN);
-
-                if (notif.contentIntent != null) {
-                    nCard.setOnClickListener(v -> {
-                        try {
-                            launchedExternalApp = true;
-                            notif.contentIntent.send();
-                            dismiss.run();
-                        } catch (Throwable ignored) {
-                            launchedExternalApp = false;
-                        }
-                    });
-                }
-
-                if (notif.quickReplyAction != null) {
-                    LinearLayout replyRow = new LinearLayout(this);
-                    replyRow.setGravity(Gravity.CENTER_VERTICAL);
-                    final EditText replyIn = new EditText(this);
-                    replyIn.setHint("在此直接输入回复…");
-                    replyIn.setTextColor(theme.textPrimary);
-                    replyIn.setHintTextColor(theme.textSecondary);
-                    replyIn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f);
-                    replyRow.addView(replyIn, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-                    TextView sendBtn = makeSheetButton("发送", () -> {
-                        String msg = replyIn.getText().toString().trim();
-                        if (!msg.isEmpty() && dispatchDirectReply(notif, msg)) {
-                            Toast.makeText(this, "已发送回复", Toast.LENGTH_SHORT).show();
-                            dismiss.run();
-                        }
-                    });
-                    replyRow.addView(sendBtn);
-                    nCard.addView(replyRow);
-                }
-                LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-                nlp.topMargin = dp(6);
-                box.addView(nCard, nlp);
-            }
-        }
-
-        List<ShortcutInfo> shortcuts = queryAppShortcuts(app);
-        if (!shortcuts.isEmpty()) {
-            addSheetSectionHeader(box, "⚡ 快捷功能直达 (App Shortcuts)");
-            List<TextView> sBtns = new ArrayList<>();
-            for (final ShortcutInfo sc : shortcuts) {
-                CharSequence lb = sc.getShortLabel();
-                sBtns.add(makeSheetButton("⚡ " + (lb == null ? "" : lb), () -> {
-                    dismiss.run();
-                    try {
-                        launchedExternalApp = true;
-                        launcherApps.startShortcut(sc, null, null);
-                    } catch (Throwable t) {
-                        launchedExternalApp = false;
-                        Toast.makeText(this, "无法打开该快捷方式", Toast.LENGTH_SHORT).show();
-                    }
-                }));
-            }
-            addGridButtons(box, sBtns, 2);
-        }
-
-        addSheetSectionHeader(box, "🛠 第一页常用与桌面管理");
-        final List<String> favs = getStringList(K_FAVS);
-        final boolean isFav = favs.contains(app.idKey);
-        List<TextView> mBtns = new ArrayList<>();
-        mBtns.add(makeSheetButton(isFav ? "★ 移出常用栏" : "☆ 加入第一页常用", () -> {
-            dismiss.run();
-            toggleFavoriteQuickly(app);
-        }));
-        if (isFav && favs.indexOf(app.idKey) > 0) {
-            mBtns.add(makeSheetButton("▲ 上移一位", () -> {
-                int i = favs.indexOf(app.idKey);
-                Collections.swap(favs, i, i - 1);
-                putStringList(K_FAVS, favs);
-                dismiss.run();
-                rebuildStreamRows();
-            }));
-        }
-        if (isFav && favs.indexOf(app.idKey) < favs.size() - 1) {
-            mBtns.add(makeSheetButton("▼ 下移一位", () -> {
-                int i = favs.indexOf(app.idKey);
-                Collections.swap(favs, i, i + 1);
-                putStringList(K_FAVS, favs);
-                dismiss.run();
-                rebuildStreamRows();
-            }));
-        }
-        mBtns.add(makeSheetButton("✎ 自定义名称", () -> { dismiss.run(); promptRenameApp(app); }));
-        mBtns.add(makeSheetButton("🎨 自定义图标", () -> { dismiss.run(); showCustomAppIconDialog(app); }));
-        mBtns.add(makeSheetButton("📁 放入文件夹", () -> { dismiss.run(); promptAddAppToFolder(app); }));
-        mBtns.add(makeSheetButton("ⓘ 应用详情", () -> {
-            dismiss.run();
-            try {
-                launchedExternalApp = true;
-                launcherApps.startAppDetailsActivity(app.component, app.user, null, null);
-            } catch (Throwable t) { launchedExternalApp = false; }
-        }));
-        mBtns.add(makeSheetButton("🙈 隐藏应用", () -> {
-            dismiss.run();
-            List<String> hid = getStringList(K_HIDDEN);
-            if (!hid.contains(app.idKey)) hid.add(app.idKey);
-            putStringList(K_HIDDEN, hid);
-            favs.remove(app.idKey);
-            putStringList(K_FAVS, favs);
-            rebuildStreamRows();
-            Toast.makeText(this, "已隐藏，可在控制中心恢复", Toast.LENGTH_SHORT).show();
-        }));
-        TextView uninst = makeSheetButton("🗑 卸载应用", () -> {
-            dismiss.run();
-            Intent i = new Intent(Intent.ACTION_DELETE, Uri.parse("package:" + app.component.getPackageName()));
-            i.putExtra(Intent.EXTRA_USER, app.user);
-            startIntentSafely(i);
-        });
-        uninst.setTextColor(0xFFEF4444);
-        mBtns.add(uninst);
-        addGridButtons(box, mBtns, 3);
-
-        holder[0] = showBottomSheetDialog(box);
-    }
-
     private void applyWallpaperAndThemePreset(final int styleIdx) {
         prefs.edit().putInt(K_THEME_IDX, styleIdx).apply();
-        Toast.makeText(this, "✨ 已切换为「" + AuroraTheme.SHORT_PALETTE_NAMES[styleIdx] + "」并同步昼夜壁纸", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "已切换为「" + AuroraTheme.SHORT_PALETTE_NAMES[styleIdx] + "」并同步昼夜壁纸", Toast.LENGTH_SHORT).show();
         AppExecutors.getInstance().computation().execute(() -> {
             try {
                 int phase = AuroraTheme.resolveSolarPhase(this);
@@ -5201,6 +4461,14 @@ public class MainActivity extends Activity {
                 int idx = Math.max(0, Math.min(COIN_ACTIONS.length - 1, prefs.getInt(K_COIN_TAP_ACTION, 1)));
                 return COIN_ACTIONS[idx];
             }
+            @Override public String getCurrentClockStyleName() {
+                int idx = Math.max(0, Math.min(NiagaraHeaderView.CLOCK_STYLE_NAMES.length - 1,
+                        prefs.getInt(K_CLOCK_STYLE, NiagaraHeaderView.CLOCK_CLASSIC)));
+                return NiagaraHeaderView.CLOCK_STYLE_NAMES[idx].split(" · ")[0];
+            }
+            @Override public String getCurrentSearchEngineName() {
+                return MainActivity.this.getCurrentSearchEngineName();
+            }
             @Override public int getPinnedWidgetCount() {
                 return widgetHelper != null ? widgetHelper.getPinnedWidgets(prefs).size() : 0;
             }
@@ -5243,6 +4511,10 @@ public class MainActivity extends Activity {
                 prefs.edit().putBoolean(K_ONE_HAND_GRAVITY, on).apply();
                 applyOneHandedListPadding();
             }
+            @Override public void onSurfaceUnreadHomeChanged(boolean on) {
+                prefs.edit().putBoolean(K_SURFACE_UNREAD_HOME, on).apply();
+                rebuildStreamRows();
+            }
             @Override public void onShowMediaChanged(boolean on) {
                 prefs.edit().putBoolean(K_SHOW_MEDIA, on).apply();
                 bindActiveMediaSession();
@@ -5267,26 +4539,28 @@ public class MainActivity extends Activity {
             @Override public void onTextScaleChanged(float scale) {
                 textScale = scale;
                 prefs.edit().putFloat(K_TEXT_SCALE, scale).apply();
+                if (niagaraHeaderView != null) niagaraHeaderView.applyTextScale(scale);
                 if (streamAdapter != null) streamAdapter.notifyDataSetChanged();
+                applyOneHandedListPadding();
             }
             @Override public void onUse24HChanged(boolean use24h) {
                 prefs.edit().putBoolean(K_USE_24H, use24h).apply();
-                if (mainClockView != null) {
-                    String fmt = use24h ? "HH:mm" : "h:mm";
-                    mainClockView.setFormat24Hour(fmt);
-                    mainClockView.setFormat12Hour(fmt);
-                }
+                if (niagaraHeaderView != null) niagaraHeaderView.setUse24Hour(use24h);
+            }
+            @Override public void showClockStylePicker() {
+                showClockStylePickerDialog();
+            }
+            @Override public void onSmartBatteryChanged(boolean smartOnly) {
+                prefs.edit().putBoolean(K_SMART_BATTERY, smartOnly).apply();
+                if (niagaraHeaderView != null) niagaraHeaderView.setSmartBatteryOnly(smartOnly);
             }
             @Override public void onStatusBarFullChanged(boolean full) {
                 prefs.edit().putBoolean(K_STATUS_BAR_FULL, full).apply();
-                if (heroStatusBar != null) heroStatusBar.setFullMode(full);
+                if (niagaraHeaderView != null) niagaraHeaderView.setStatusBarFullMode(full);
             }
             @Override public void onHeroHighContrastChanged(boolean highContrast) {
                 prefs.edit().putBoolean(K_HERO_HIGH_CONTRAST, highContrast).apply();
-                if (heroStatusBar != null) {
-                    heroStatusBar.setAestheticStyle(highContrast
-                            ? HeroStatusBarView.STYLE_HIGH_CONTRAST : HeroStatusBarView.STYLE_AIRY);
-                }
+                if (niagaraHeaderView != null) niagaraHeaderView.setHeroHighContrast(highContrast);
             }
             @Override public void onFavCardsChanged(boolean on) {
                 prefs.edit().putBoolean(K_FAV_CARDS, on).apply();
@@ -5297,6 +4571,7 @@ public class MainActivity extends Activity {
                 showSingleChoiceDialog("列表疏密程度", DENSITY_NAMES, curDensity, idx -> {
                     prefs.edit().putInt(K_ROW_DENSITY, idx).apply();
                     if (streamAdapter != null) streamAdapter.notifyDataSetChanged();
+                    applyOneHandedListPadding();
                 });
             }
             @Override public void onPullDownSearchChanged(boolean on) {
@@ -5306,6 +4581,13 @@ public class MainActivity extends Activity {
                 prefs.edit().putBoolean(K_WAVE_IDLE_DOTS, dots).apply();
                 if (rightWaveBar != null) rightWaveBar.setIdleDotsMode(dots);
                 if (leftGhostWaveBar != null) leftGhostWaveBar.setIdleDotsMode(dots);
+            }
+            @Override public void onWaveAdaptiveAlphaChanged(boolean adaptive) {
+                prefs.edit().putBoolean(K_WAVE_ADAPTIVE_ALPHA, adaptive).apply();
+                syncWaveBarSymbolsAndData(new HashSet<>(getStringList(K_HIDDEN)));
+            }
+            @Override public void showSearchEnginePicker() {
+                showSearchEnginePickerDialog();
             }
             @Override public void onCoinLeftChanged(boolean left) {
                 prefs.edit().putBoolean(K_COIN_LEFT, left).apply();
@@ -5319,6 +4601,8 @@ public class MainActivity extends Activity {
             }
             @Override public void onPullLaunchChanged(boolean on) {
                 prefs.edit().putBoolean(K_PULL_LAUNCH, on).apply();
+                if (rightWaveBar != null) rightWaveBar.setPullLaunchEnabled(on);
+                if (leftGhostWaveBar != null) leftGhostWaveBar.setPullLaunchEnabled(on);
             }
             @Override public void onDoubleTapLockChanged(boolean on) {
                 prefs.edit().putBoolean(K_DOUBLE_TAP_LOCK, on).apply();
@@ -5516,10 +4800,30 @@ public class MainActivity extends Activity {
 
     private void showCoinActionPickerDialog() {
         int cur = Math.max(0, Math.min(COIN_ACTIONS.length - 1, prefs.getInt(K_COIN_TAP_ACTION, 1)));
-        showSingleChoiceDialog("🔘 悬浮按钮轻点动作", COIN_ACTIONS, cur, idx -> {
+        showSingleChoiceDialog("悬浮按钮轻点动作", COIN_ACTIONS, cur, idx -> {
             prefs.edit().putInt(K_COIN_TAP_ACTION, idx).apply();
             applyCoinButtonConfig();
             Toast.makeText(MainActivity.this, "已设为：" + COIN_ACTIONS[idx], Toast.LENGTH_SHORT).show();
+        });
+    }
+
+    private void showClockStylePickerDialog() {
+        int cur = Math.max(0, Math.min(NiagaraHeaderView.CLOCK_STYLE_NAMES.length - 1,
+                prefs.getInt(K_CLOCK_STYLE, NiagaraHeaderView.CLOCK_CLASSIC)));
+        showSingleChoiceDialog("时钟排版风格", NiagaraHeaderView.CLOCK_STYLE_NAMES, cur, idx -> {
+            prefs.edit().putInt(K_CLOCK_STYLE, idx).apply();
+            if (niagaraHeaderView != null) niagaraHeaderView.applyClockStyle(idx);
+            applyOneHandedListPadding();
+            Toast.makeText(MainActivity.this, "已切换为：" + NiagaraHeaderView.CLOCK_STYLE_NAMES[idx], Toast.LENGTH_SHORT).show();
+        });
+    }
+
+    private void showSearchEnginePickerDialog() {
+        int cur = Math.max(0, Math.min(SEARCH_ENGINE_NAMES.length - 1, prefs.getInt(K_SEARCH_ENGINE, 0)));
+        showSingleChoiceDialog("默认网页搜索引擎", SEARCH_ENGINE_NAMES, cur, idx -> {
+            prefs.edit().putInt(K_SEARCH_ENGINE, idx).apply();
+            if (searchActive) rebuildStreamRows();
+            Toast.makeText(MainActivity.this, "已设为：" + SEARCH_ENGINE_NAMES[idx], Toast.LENGTH_SHORT).show();
         });
     }
 
@@ -5546,42 +4850,6 @@ public class MainActivity extends Activity {
             box.addView(rowBtn, rlp);
         }
         holder[0] = showBottomSheetDialog(box);
-    }
-
-    private void showThemePickerDialog() {
-        String[] names = new String[AuroraTheme.PRESETS.length];
-        for (int i = 0; i < names.length; i++) names[i] = AuroraTheme.PRESETS[i].name;
-        int cur = Math.max(0, Math.min(AuroraTheme.PRESETS.length - 1, prefs.getInt(K_THEME_IDX, AuroraTheme.IDX_DEFAULT)));
-        showSingleChoiceDialog("🌓 选择昼夜交替壁纸 / 主题模式", names, cur, idx -> {
-            if (idx < 6) {
-                applyWallpaperAndThemePreset(idx);
-            } else {
-                prefs.edit().putInt(K_THEME_IDX, idx).apply();
-                recreate();
-            }
-        });
-    }
-
-    private void showWallpaperPickerDialog() {
-        String[] opts = {
-            "⛰️ 山岚叠翠 · 大地（日出日落护眼壁纸）",
-            "🌊 流光水韵 · 灵动（日出日落护眼壁纸）",
-            "🏜️ 静谧沙丘 · 光影（日出日落护眼壁纸）",
-            "☁️ 云海天际 · 晴空（日出日落护眼壁纸）",
-            "📜 宣纸墨韵 · 东方（日出日落护眼壁纸）",
-            "🌙 纯色柔光 · 护眼（日出日落护眼壁纸）",
-            "📷 从本机相册选择图片…"
-        };
-        showSingleChoiceDialog("🖼 统一设置系统桌面与锁屏壁纸", opts,
-                Math.max(0, Math.min(5, prefs.getInt(K_THEME_IDX, 0))), w -> {
-            if (w == 6) {
-                Intent pick = new Intent(Intent.ACTION_GET_CONTENT).setType("image/*").addCategory(Intent.CATEGORY_OPENABLE);
-                try { launchedExternalApp = true; startActivityForResult(pick, REQ_PICK_WALL); }
-                catch (Throwable t) { launchedExternalApp = false; }
-                return;
-            }
-            applyWallpaperAndThemePreset(w);
-        });
     }
 
     private void showPickFavoritesDialog() {
@@ -5951,6 +5219,290 @@ public class MainActivity extends Activity {
         }
     }
 
+    // ---------- App Pop-up 关联子应用集合 ----------
+    private JSONObject getAppPopupsJson() {
+        try { return new JSONObject(prefs.getString(K_APP_POPUPS, "{}")); }
+        catch (Throwable t) { return new JSONObject(); }
+    }
+
+    private void invalidateAppPopupsCache() {
+        appPopupsCache = null;
+    }
+
+    private List<String> getAppPopupChildKeysCached(String parentKey) {
+        if (parentKey == null || parentKey.isEmpty()) return Collections.emptyList();
+        if (appPopupsCache == null) {
+            Map<String, List<String>> map = new HashMap<>();
+            JSONObject obj = getAppPopupsJson();
+            for (Iterator<String> it = obj.keys(); it.hasNext(); ) {
+                String pk = it.next();
+                JSONArray arr = obj.optJSONArray(pk);
+                if (arr == null || arr.length() == 0) continue;
+                List<String> list = new ArrayList<>();
+                for (int i = 0; i < arr.length(); i++) {
+                    String ck = arr.optString(i, "");
+                    if (!ck.isEmpty() && !ck.equals(pk) && !list.contains(ck)) {
+                        list.add(ck);
+                    }
+                }
+                if (!list.isEmpty()) map.put(pk, list);
+            }
+            appPopupsCache = map;
+        }
+        List<String> keys = appPopupsCache.get(parentKey);
+        return keys != null ? keys : Collections.emptyList();
+    }
+
+    private boolean hasAppPopupChildren(String parentKey) {
+        List<String> keys = getAppPopupChildKeysCached(parentKey);
+        if (keys.isEmpty()) return false;
+        for (String k : keys) {
+            if (findAppByKey(k) != null) return true;
+        }
+        return false;
+    }
+
+    private List<AppEntry> getAppPopupChildren(AppEntry parent) {
+        if (parent == null) return Collections.emptyList();
+        List<String> keys = getAppPopupChildKeysCached(parent.idKey);
+        if (keys.isEmpty()) return Collections.emptyList();
+        List<AppEntry> out = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        for (String k : keys) {
+            if (k.equals(parent.idKey) || !seen.add(k)) continue;
+            AppEntry a = findAppByKey(k);
+            if (a != null) out.add(a);
+        }
+        return out;
+    }
+
+    private void removeAppPopupChild(AppEntry parent, AppEntry child) {
+        if (parent == null || child == null) return;
+        try {
+            JSONObject obj = getAppPopupsJson();
+            JSONArray cur = obj.optJSONArray(parent.idKey);
+            if (cur == null) return;
+            JSONArray next = new JSONArray();
+            for (int i = 0; i < cur.length(); i++) {
+                String k = cur.optString(i, "");
+                if (!k.isEmpty() && !k.equals(child.idKey)) next.put(k);
+            }
+            if (next.length() == 0) obj.remove(parent.idKey);
+            else obj.put(parent.idKey, next);
+            prefs.edit().putString(K_APP_POPUPS, obj.toString()).apply();
+            invalidateAppPopupsCache();
+            if (streamAdapter != null) streamAdapter.notifyDataSetChanged();
+        } catch (Throwable ignored) {}
+    }
+
+    private void promptEditAppPopupChildren(final AppEntry parent) {
+        if (parent == null) return;
+        final List<AppEntry> candidates = new ArrayList<>();
+        for (AppEntry a : allApps) {
+            if (a == virtualSettingsApp || a.idKey.equals(parent.idKey)) continue;
+            candidates.add(a);
+        }
+        final List<String> curKeys = new ArrayList<>(getAppPopupChildKeysCached(parent.idKey));
+        final Set<String> selectedKeys = new LinkedHashSet<>(curKeys);
+
+        final LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        final Dialog[] holder = new Dialog[1];
+        final Runnable dismiss = () -> { if (holder[0] != null) holder[0].dismiss(); };
+
+        LinearLayout topHeader = new LinearLayout(this);
+        topHeader.setOrientation(LinearLayout.HORIZONTAL);
+        topHeader.setGravity(Gravity.CENTER_VERTICAL);
+        TextView titleTv = makeText("管理「" + parent.label + "」Pop-up", 17.5f, theme.textPrimary, true);
+        topHeader.addView(titleTv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        final TextView countBadge = makeText("已选 " + selectedKeys.size() + " 个", 12f, theme.accent, true);
+        countBadge.setBackground(theme.accentGlowPill(dpUnit, 10));
+        countBadge.setPadding(dp(10), dp(4), dp(10), dp(4));
+        topHeader.addView(countBadge);
+        box.addView(topHeader);
+
+        TextView tip = makeText("在首页对「" + parent.label + "」右滑即可原地展开所选关联应用", 11.8f, theme.textSecondary, false);
+        tip.setPadding(0, dp(2), 0, dp(8));
+        box.addView(tip);
+
+        final EditText searchBox = new EditText(this);
+        searchBox.setHint("按字母或名称查找关联应用…");
+        styleGlassEditText(searchBox, "按字母或名称查找关联应用…");
+        searchBox.setSingleLine(true);
+        searchBox.setImeOptions(EditorInfo.IME_ACTION_DONE);
+        box.addView(searchBox);
+
+        final List<String> letters = new ArrayList<>();
+        letters.add("全部");
+        letters.add("已选");
+        for (char c = 'A'; c <= 'Z'; c++) {
+            for (AppEntry a : candidates) {
+                if (a.groupChar == c) {
+                    letters.add(String.valueOf(c));
+                    break;
+                }
+            }
+        }
+        for (AppEntry a : candidates) {
+            if (a.groupChar == '#') {
+                letters.add("#");
+                break;
+            }
+        }
+
+        HorizontalScrollView letterScroll = new HorizontalScrollView(this);
+        letterScroll.setHorizontalScrollBarEnabled(false);
+        letterScroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        final LinearLayout letterRow = new LinearLayout(this);
+        letterRow.setOrientation(LinearLayout.HORIZONTAL);
+        letterRow.setGravity(Gravity.CENTER_VERTICAL);
+        letterRow.setPadding(0, dp(8), 0, dp(8));
+
+        final String[] curFilterLetter = new String[]{"全部"};
+        final List<TextView> letterPills = new ArrayList<>();
+        final LinearLayout gridContainer = new LinearLayout(this);
+        gridContainer.setOrientation(LinearLayout.VERTICAL);
+
+        final TextView saveBtn = makeSheetButton("保存关联 (" + selectedKeys.size() + ")", null);
+
+        final Runnable refreshGrid = new Runnable() {
+            @Override
+            public void run() {
+                gridContainer.removeAllViews();
+                String filter = curFilterLetter[0];
+                String query = searchBox.getText().toString().trim().toLowerCase(Locale.ROOT);
+
+                List<AppEntry> matched = new ArrayList<>();
+                for (AppEntry a : candidates) {
+                    if ("已选".equals(filter)) {
+                        if (!selectedKeys.contains(a.idKey)) continue;
+                    } else if (!"全部".equals(filter)) {
+                        if (filter.length() == 1 && a.groupChar != filter.charAt(0)) continue;
+                    }
+                    if (!query.isEmpty()) {
+                        boolean hit = (a.label != null && a.label.toLowerCase(Locale.ROOT).contains(query))
+                                || (a.iniPy != null && a.iniPy.toLowerCase(Locale.ROOT).contains(query))
+                                || (a.fullPy != null && a.fullPy.toLowerCase(Locale.ROOT).contains(query))
+                                || (query.length() == 1 && Character.toUpperCase(query.charAt(0)) == a.groupChar);
+                        if (!hit) continue;
+                    }
+                    matched.add(a);
+                }
+
+                if (matched.isEmpty()) {
+                    TextView emptyTv = makeText("无匹配应用，请尝试其他字母或清空搜索", 12.5f, theme.textSecondary, false);
+                    emptyTv.setGravity(Gravity.CENTER);
+                    emptyTv.setPadding(0, dp(22), 0, dp(22));
+                    gridContainer.addView(emptyTv);
+                    return;
+                }
+
+                List<TextView> itemBtns = new ArrayList<>();
+                for (final AppEntry app : matched) {
+                    final boolean isChecked = selectedKeys.contains(app.idKey);
+                    final TextView btn = makeText(
+                            (isChecked ? "✓ " : "○ ") + app.label,
+                            13.2f,
+                            isChecked ? theme.accent : theme.textPrimary,
+                            isChecked);
+                    btn.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+                    btn.setSingleLine(true);
+                    btn.setEllipsize(TextUtils.TruncateAt.END);
+                    btn.setBackground(isChecked ? theme.accentGlowPill(dpUnit, 14) : theme.sheetTileCard(dpUnit, 14));
+                    btn.setPadding(dp(12), dp(10), dp(12), dp(10));
+                    btn.setOnClickListener(v -> {
+                        if (selectedKeys.contains(app.idKey)) selectedKeys.remove(app.idKey);
+                        else selectedKeys.add(app.idKey);
+                        boolean nowChecked = selectedKeys.contains(app.idKey);
+                        btn.setText((nowChecked ? "✓ " : "○ ") + app.label);
+                        btn.setTextColor(nowChecked ? theme.accent : theme.textPrimary);
+                        btn.setTypeface(nowChecked ? Typeface.create(typeface, Typeface.BOLD) : typeface);
+                        btn.setBackground(nowChecked ? theme.accentGlowPill(dpUnit, 14) : theme.sheetTileCard(dpUnit, 14));
+                        countBadge.setText("已选 " + selectedKeys.size() + " 个");
+                        saveBtn.setText("保存关联 (" + selectedKeys.size() + ")");
+                        if ("已选".equals(curFilterLetter[0])) run();
+                    });
+                    itemBtns.add(btn);
+                }
+                addGridButtons(gridContainer, itemBtns, 2);
+            }
+        };
+
+        for (int i = 0; i < letters.size(); i++) {
+            final String l = letters.get(i);
+            final TextView pill = makeText(l, 12.0f, theme.textSecondary, false);
+            pill.setGravity(Gravity.CENTER);
+            pill.setPadding(dp(11), dp(5), dp(11), dp(5));
+            pill.setBackground(theme.subtleGhostPill(dpUnit, 10));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.rightMargin = dp(6);
+            pill.setLayoutParams(lp);
+            pill.setOnClickListener(v -> {
+                curFilterLetter[0] = l;
+                for (TextView p : letterPills) {
+                    boolean active = l.equals(p.getText().toString());
+                    p.setTextColor(active ? theme.accent : theme.textSecondary);
+                    p.setTypeface(active ? Typeface.create(typeface, Typeface.BOLD) : typeface);
+                    p.setBackground(active ? theme.accentGlowPill(dpUnit, 10) : theme.subtleGhostPill(dpUnit, 10));
+                }
+                refreshGrid.run();
+            });
+            if (i == 0) {
+                pill.setTextColor(theme.accent);
+                pill.setTypeface(Typeface.create(typeface, Typeface.BOLD));
+                pill.setBackground(theme.accentGlowPill(dpUnit, 10));
+            }
+            letterPills.add(pill);
+            letterRow.addView(pill);
+        }
+        letterScroll.addView(letterRow);
+        box.addView(letterScroll);
+
+        searchBox.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) { refreshGrid.run(); }
+            @Override public void afterTextChanged(Editable s) {}
+        });
+
+        box.addView(gridContainer);
+        refreshGrid.run();
+
+        List<TextView> actions = new ArrayList<>();
+        actions.add(makeSheetButton("取消", dismiss));
+        saveBtn.setOnClickListener(v -> {
+            try {
+                JSONObject obj = getAppPopupsJson();
+                JSONArray next = new JSONArray();
+                Set<String> written = new HashSet<>();
+                for (String k : curKeys) {
+                    if (selectedKeys.contains(k) && written.add(k)) next.put(k);
+                }
+                for (AppEntry a : candidates) {
+                    if (selectedKeys.contains(a.idKey) && written.add(a.idKey)) next.put(a.idKey);
+                }
+                if (next.length() == 0) obj.remove(parent.idKey);
+                else obj.put(parent.idKey, next);
+                prefs.edit().putString(K_APP_POPUPS, obj.toString()).apply();
+                invalidateAppPopupsCache();
+                if (streamAdapter != null) streamAdapter.notifyDataSetChanged();
+                Toast.makeText(MainActivity.this,
+                        next.length() == 0
+                                ? "已清空「" + parent.label + "」关联 Pop-up"
+                                : "已更新「" + parent.label + "」关联 Pop-up（" + next.length() + " 个应用）",
+                        Toast.LENGTH_SHORT).show();
+            } catch (Throwable ignored) {}
+            dismiss.run();
+        });
+        saveBtn.setBackground(theme.solidAccentButton(dpUnit, 14));
+        saveBtn.setTextColor(0xFFFFFFFF);
+        actions.add(saveBtn);
+        addGridButtons(box, actions, 2);
+
+        holder[0] = showBottomSheetDialog(box);
+    }
+
     // ---------- 文件夹管理 ----------
     private JSONArray getFoldersArray() {
         try { return new JSONArray(prefs.getString(K_FOLDERS, "[]")); }
@@ -5960,31 +5512,7 @@ public class MainActivity extends Activity {
     private void saveFoldersArray(JSONArray arr) {
         prefs.edit().putString(K_FOLDERS, arr.toString()).apply();
         folderIconCache.clear();
-        rebuildFolderCapsules();
         rebuildStreamRows();
-    }
-
-    private void rebuildFolderCapsules() {
-        if (folderCapsulesRow == null || folderScroll == null) return;
-        folderCapsulesRow.removeAllViews();
-        JSONArray arr = getFoldersArray();
-        for (int i = 0; i < arr.length(); i++) {
-            final int fIdx = i;
-            JSONObject fo = arr.optJSONObject(i);
-            if (fo == null) continue;
-            JSONArray apps = fo.optJSONArray("apps");
-            int cnt = apps == null ? 0 : apps.length();
-            TextView pill = makeText("📁 " + fo.optString("name", "文件夹") + " · " + cnt, 13f, theme.textPrimary, false);
-            pill.setBackground(theme.glassCard(dpUnit, 16));
-            pill.setPadding(dp(12), dp(7), dp(12), dp(7));
-            pill.setOnClickListener(v -> openFolderSheet(fIdx));
-            pill.setOnLongClickListener(v -> { promptEditFolder(fIdx); return true; });
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            lp.rightMargin = dp(8);
-            folderCapsulesRow.addView(pill, lp);
-        }
-        folderScroll.setVisibility(folderCapsulesRow.getChildCount() > 0 ? View.VISIBLE : View.GONE);
     }
 
     private void promptCreateFolder(final AppEntry initialApp) {
@@ -5993,7 +5521,7 @@ public class MainActivity extends Activity {
         final Dialog[] holder = new Dialog[1];
         final Runnable dismiss = () -> { if (holder[0] != null) holder[0].dismiss(); };
 
-        box.addView(makeText("📁 新建弹出式胶囊文件夹", 18f, theme.textPrimary, true));
+        box.addView(makeText("新建弹出式文件夹", 18f, theme.textPrimary, true));
         TextView tip = makeText("输入文件夹名称（如：高频办公、金融支付、影音娱乐）", 12.2f, theme.textSecondary, false);
         tip.setPadding(0, dp(3), 0, dp(10));
         box.addView(tip);
@@ -6034,52 +5562,109 @@ public class MainActivity extends Activity {
         final JSONArray arr = getFoldersArray();
         final JSONObject fo = arr.optJSONObject(folderIdx);
         if (fo == null) return;
-        final List<AppEntry> candidates = new ArrayList<>(allApps);
-        final Set<String> existing = new HashSet<>();
-        JSONArray cur = fo.optJSONArray("apps");
-        if (cur != null) for (int i = 0; i < cur.length(); i++) existing.add(cur.optString(i));
-
-        final boolean[] checked = new boolean[candidates.size()];
-        for (int i = 0; i < candidates.size(); i++) {
-            checked[i] = existing.contains(candidates.get(i).idKey);
+        final List<AppEntry> candidates = new ArrayList<>();
+        for (AppEntry a : allApps) {
+            if (a != virtualSettingsApp) candidates.add(a);
         }
+        final List<String> curOrdered = new ArrayList<>();
+        JSONArray cur = fo.optJSONArray("apps");
+        if (cur != null) {
+            for (int i = 0; i < cur.length(); i++) {
+                String k = cur.optString(i, "");
+                if (!k.isEmpty() && !curOrdered.contains(k)) curOrdered.add(k);
+            }
+        }
+        final Set<String> selectedKeys = new LinkedHashSet<>(curOrdered);
 
         final LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         final Dialog[] holder = new Dialog[1];
         final Runnable dismiss = () -> { if (holder[0] != null) holder[0].dismiss(); };
 
-        box.addView(makeText("📁 勾选「" + fo.optString("name") + "」内的应用", 18f, theme.textPrimary, true));
-        List<TextView> itemBtns = new ArrayList<>();
-        for (int i = 0; i < candidates.size(); i++) {
-            final int idx = i;
-            final AppEntry app = candidates.get(i);
-            final TextView btn = makeText(
-                    (checked[idx] ? "✓ " : "○ ") + app.label,
-                    13.2f,
-                    checked[idx] ? theme.accent : theme.textPrimary,
-                    checked[idx]);
-            btn.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
-            btn.setSingleLine(true);
-            btn.setEllipsize(TextUtils.TruncateAt.END);
-            btn.setBackground(checked[idx] ? theme.accentGlowPill(dpUnit, 14) : theme.sheetTileCard(dpUnit, 14));
-            btn.setPadding(dp(12), dp(10), dp(12), dp(10));
-            btn.setOnClickListener(v -> {
-                checked[idx] = !checked[idx];
-                btn.setText((checked[idx] ? "✓ " : "○ ") + app.label);
-                btn.setTextColor(checked[idx] ? theme.accent : theme.textPrimary);
-                btn.setTypeface(checked[idx] ? Typeface.create(typeface, Typeface.BOLD) : typeface);
-                btn.setBackground(checked[idx] ? theme.accentGlowPill(dpUnit, 14) : theme.sheetTileCard(dpUnit, 14));
-            });
-            itemBtns.add(btn);
-        }
-        addGridButtons(box, itemBtns, 2);
+        LinearLayout topHdr = new LinearLayout(this);
+        topHdr.setGravity(Gravity.CENTER_VERTICAL);
+        topHdr.addView(makeText("勾选「" + fo.optString("name") + "」内应用", 17.5f, theme.textPrimary, true),
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        final TextView badge = makeText("已选 " + selectedKeys.size() + " 个", 12f, theme.accent, true);
+        badge.setBackground(theme.accentGlowPill(dpUnit, 10));
+        badge.setPadding(dp(10), dp(4), dp(10), dp(4));
+        topHdr.addView(badge);
+        box.addView(topHdr);
 
-        TextView saveBtn = makeSheetButton("✓ 保存文件夹", () -> {
+        final EditText searchBox = new EditText(this);
+        styleGlassEditText(searchBox, "按名称或拼音筛选应用…");
+        searchBox.setSingleLine(true);
+        LinearLayout.LayoutParams sblp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        sblp.topMargin = dp(8);
+        sblp.bottomMargin = dp(6);
+        box.addView(searchBox, sblp);
+
+        final LinearLayout gridContainer = new LinearLayout(this);
+        gridContainer.setOrientation(LinearLayout.VERTICAL);
+        final TextView saveBtn = makeSheetButton("保存文件夹 (" + selectedKeys.size() + ")", null);
+
+        final Runnable refreshGrid = () -> {
+            gridContainer.removeAllViews();
+            String q = searchBox.getText().toString().trim().toLowerCase(Locale.ROOT);
+            List<TextView> itemBtns = new ArrayList<>();
+            for (final AppEntry app : candidates) {
+                if (!q.isEmpty()) {
+                    boolean hit = (app.label != null && app.label.toLowerCase(Locale.ROOT).contains(q))
+                            || (app.iniPy != null && app.iniPy.toLowerCase(Locale.ROOT).contains(q))
+                            || (app.fullPy != null && app.fullPy.toLowerCase(Locale.ROOT).contains(q));
+                    if (!hit) continue;
+                }
+                final boolean isChecked = selectedKeys.contains(app.idKey);
+                final TextView btn = makeText(
+                        (isChecked ? "✓ " : "○ ") + app.label,
+                        13.2f,
+                        isChecked ? theme.accent : theme.textPrimary,
+                        isChecked);
+                btn.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+                btn.setSingleLine(true);
+                btn.setEllipsize(TextUtils.TruncateAt.END);
+                btn.setBackground(isChecked ? theme.accentGlowPill(dpUnit, 14) : theme.sheetTileCard(dpUnit, 14));
+                btn.setPadding(dp(12), dp(10), dp(12), dp(10));
+                btn.setOnClickListener(v -> {
+                    if (selectedKeys.contains(app.idKey)) selectedKeys.remove(app.idKey);
+                    else selectedKeys.add(app.idKey);
+                    boolean now = selectedKeys.contains(app.idKey);
+                    btn.setText((now ? "✓ " : "○ ") + app.label);
+                    btn.setTextColor(now ? theme.accent : theme.textPrimary);
+                    btn.setTypeface(now ? Typeface.create(typeface, Typeface.BOLD) : typeface);
+                    btn.setBackground(now ? theme.accentGlowPill(dpUnit, 14) : theme.sheetTileCard(dpUnit, 14));
+                    badge.setText("已选 " + selectedKeys.size() + " 个");
+                    saveBtn.setText("保存文件夹 (" + selectedKeys.size() + ")");
+                });
+                itemBtns.add(btn);
+            }
+            if (itemBtns.isEmpty()) {
+                TextView emptyTv = makeText("无匹配应用", 12.5f, theme.textSecondary, false);
+                emptyTv.setGravity(Gravity.CENTER);
+                emptyTv.setPadding(0, dp(20), 0, dp(20));
+                gridContainer.addView(emptyTv);
+            } else {
+                addGridButtons(gridContainer, itemBtns, 2);
+            }
+        };
+        searchBox.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) { refreshGrid.run(); }
+            @Override public void afterTextChanged(Editable s) {}
+        });
+        box.addView(gridContainer);
+        refreshGrid.run();
+
+        saveBtn.setOnClickListener(v -> {
             try {
                 JSONArray next = new JSONArray();
-                for (int i = 0; i < candidates.size(); i++) {
-                    if (checked[i]) next.put(candidates.get(i).idKey);
+                Set<String> seen = new HashSet<>();
+                for (String k : curOrdered) {
+                    if (selectedKeys.contains(k) && seen.add(k)) next.put(k);
+                }
+                for (AppEntry a : candidates) {
+                    if (selectedKeys.contains(a.idKey) && seen.add(a.idKey)) next.put(a.idKey);
                 }
                 fo.put("apps", next);
                 saveFoldersArray(arr);
@@ -6096,64 +5681,200 @@ public class MainActivity extends Activity {
         holder[0] = showBottomSheetDialog(box);
     }
 
-    private void promptEditFolder(final int folderIdx) {
+    private void promptRenameFolder(final int folderIdx) {
         final JSONArray arr = getFoldersArray();
         final JSONObject fo = arr.optJSONObject(folderIdx);
         if (fo == null) return;
-        showSingleChoiceDialog("📁 管理「" + fo.optString("name") + "」",
-                new String[]{"⭐ 勾选文件夹内应用", "🗑 删除该文件夹（不卸载应用）"}, 0, w -> {
-            if (w == 0) promptSelectFolderApps(folderIdx);
-            else {
-                arr.remove(folderIdx);
-                saveFoldersArray(arr);
-            }
-        });
-    }
-
-    private void openFolderSheet(final int folderIdx) {
-        JSONObject fo = getFoldersArray().optJSONObject(folderIdx);
-        if (fo == null) return;
-        LinearLayout box = new LinearLayout(this);
+        final LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         final Dialog[] holder = new Dialog[1];
+        final Runnable dismiss = () -> { if (holder[0] != null) holder[0].dismiss(); };
 
-        LinearLayout hdr = new LinearLayout(this);
-        hdr.setGravity(Gravity.CENTER_VERTICAL);
-        hdr.addView(makeText("📁 " + fo.optString("name"), 18, theme.textPrimary, true),
-                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        TextView editBtn = makeSheetButton("管理", () -> {
-            if (holder[0] != null) holder[0].dismiss();
-            promptEditFolder(folderIdx);
-        });
-        hdr.addView(editBtn);
-        box.addView(hdr);
+        box.addView(makeText("重命名文件夹", 18f, theme.textPrimary, true));
+        final EditText input = new EditText(this);
+        styleGlassEditText(input, "输入新的文件夹名称");
+        input.setText(fo.optString("name", "文件夹"));
+        input.setSelection(input.getText().length());
+        input.setSingleLine(true);
+        LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        ilp.topMargin = dp(10);
+        box.addView(input, ilp);
 
-        JSONArray apps = fo.optJSONArray("apps");
         List<TextView> btns = new ArrayList<>();
-        if (apps != null) {
-            for (int i = 0; i < apps.length(); i++) {
-                final AppEntry a = findAppByKey(apps.optString(i));
-                if (a == null) continue;
-                btns.add(makeSheetButton(a.label, () -> {
-                    if (holder[0] != null) holder[0].dismiss();
-                    launchApp(a);
-                }));
+        btns.add(makeSheetButton("取消", dismiss));
+        TextView saveBtn = makeSheetButton("保存名称", () -> {
+            String name = input.getText().toString().trim();
+            if (name.isEmpty()) return;
+            try {
+                fo.put("name", name);
+                saveFoldersArray(arr);
+            } catch (Throwable ignored) {}
+            dismiss.run();
+        });
+        saveBtn.setBackground(theme.solidAccentButton(dpUnit, 14));
+        saveBtn.setTextColor(0xFFFFFFFF);
+        btns.add(saveBtn);
+        addGridButtons(box, btns, 2);
+
+        holder[0] = showBottomSheetDialog(box);
+    }
+
+    private void promptReorderFolderApps(final int folderIdx) {
+        final JSONArray arr = getFoldersArray();
+        final JSONObject fo = arr.optJSONObject(folderIdx);
+        if (fo == null) return;
+        final Map<String, AppEntry> byKey = new HashMap<>();
+        for (AppEntry a : allApps) byKey.put(a.idKey, a);
+        final List<String> keys = new ArrayList<>();
+        JSONArray cur = fo.optJSONArray("apps");
+        if (cur != null) {
+            for (int i = 0; i < cur.length(); i++) {
+                String k = cur.optString(i, "");
+                if (!k.isEmpty() && byKey.containsKey(k) && !keys.contains(k)) keys.add(k);
             }
         }
-        if (btns.isEmpty()) {
-            box.addView(makeText("文件夹为空，点击右上角「管理」添加应用", 13, theme.textSecondary, false));
-        } else {
-            addGridButtons(box, btns, 2);
+        if (keys.size() < 2) {
+            Toast.makeText(this, "文件夹内至少需要 2 个应用才可调整顺序", Toast.LENGTH_SHORT).show();
+            return;
         }
+        final LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        final Dialog[] holder = new Dialog[1];
+        final Runnable dismiss = () -> { if (holder[0] != null) holder[0].dismiss(); };
+
+        box.addView(makeText("调整「" + fo.optString("name", "文件夹") + "」内应用顺序", 17.5f, theme.textPrimary, true));
+        TextView dragTip = makeText("按住左侧 ≡ 上下拖拽，或点击右侧箭头调整顺序（首位将用于点击直开）", 12f, theme.textSecondary, false);
+        dragTip.setPadding(0, dp(2), 0, dp(6));
+        box.addView(dragTip);
+
+        final LinearLayout listCol = new LinearLayout(this);
+        listCol.setOrientation(LinearLayout.VERTICAL);
+        listCol.setPadding(0, dp(4), 0, dp(8));
+
+        final Runnable[] refreshUi = new Runnable[1];
+        refreshUi[0] = () -> {
+            listCol.removeAllViews();
+            for (int i = 0; i < keys.size(); i++) {
+                final int idx = i;
+                final LinearLayout r = new LinearLayout(this);
+                r.setGravity(Gravity.CENTER_VERTICAL);
+                r.setBackground(theme.sheetTileCard(dpUnit, 14));
+                r.setPadding(dp(10), dp(6), dp(8), dp(6));
+
+                TextView dragHandle = makeText("≡", 18f, theme.accent, true);
+                dragHandle.setGravity(Gravity.CENTER);
+                dragHandle.setOnTouchListener(new View.OnTouchListener() {
+                    private float startRawY;
+                    private int curIdx = idx;
+
+                    @Override
+                    public boolean onTouch(View v, MotionEvent event) {
+                        int act = event.getActionMasked();
+                        if (act == MotionEvent.ACTION_DOWN) {
+                            startRawY = event.getRawY();
+                            curIdx = idx;
+                            v.getParent().getParent().requestDisallowInterceptTouchEvent(true);
+                            r.setAlpha(0.85f);
+                            r.setScaleX(1.02f);
+                            r.setScaleY(1.02f);
+                            r.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+                            return true;
+                        }
+                        if (act == MotionEvent.ACTION_MOVE) {
+                            float dy = event.getRawY() - startRawY;
+                            float stepPx = Math.max(dp(44), r.getHeight() + dp(6));
+                            if (dy > stepPx * 0.7f && curIdx < keys.size() - 1) {
+                                Collections.swap(keys, curIdx, curIdx + 1);
+                                curIdx++;
+                                startRawY += stepPx;
+                                r.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
+                                updateDragRowLabels(listCol, keys, byKey);
+                            } else if (dy < -stepPx * 0.7f && curIdx > 0) {
+                                Collections.swap(keys, curIdx, curIdx - 1);
+                                curIdx--;
+                                startRawY -= stepPx;
+                                r.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
+                                updateDragRowLabels(listCol, keys, byKey);
+                            }
+                            return true;
+                        }
+                        if (act == MotionEvent.ACTION_UP || act == MotionEvent.ACTION_CANCEL) {
+                            r.setAlpha(1f);
+                            r.setScaleX(1f);
+                            r.setScaleY(1f);
+                            refreshUi[0].run();
+                            return true;
+                        }
+                        return false;
+                    }
+                });
+                r.addView(dragHandle, new LinearLayout.LayoutParams(dp(34), dp(40)));
+
+                TextView tv = makeText((i + 1) + ".  " + byKey.get(keys.get(i)).label, 15f, theme.textPrimary, true);
+                tv.setGravity(Gravity.CENTER_VERTICAL);
+                r.addView(tv, new LinearLayout.LayoutParams(0, dp(40), 1f));
+
+                for (int k = 0; k < 2; k++) {
+                    final int delta = (k == 0) ? -1 : 1;
+                    TextView arrow = makeText(k == 0 ? "▲" : "▼", 15f, theme.accent, true);
+                    arrow.setGravity(Gravity.CENTER);
+                    boolean valid = idx + delta >= 0 && idx + delta < keys.size();
+                    arrow.setAlpha(valid ? 1f : 0.22f);
+                    if (valid) {
+                        arrow.setOnClickListener(v -> {
+                            Collections.swap(keys, idx, idx + delta);
+                            refreshUi[0].run();
+                        });
+                    }
+                    r.addView(arrow, new LinearLayout.LayoutParams(dp(38), dp(40)));
+                }
+                LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                rlp.topMargin = dp(6);
+                listCol.addView(r, rlp);
+            }
+        };
+        refreshUi[0].run();
+        box.addView(listCol);
+
+        TextView saveBtn = makeSheetButton("保存顺序", () -> {
+            try {
+                JSONArray next = new JSONArray();
+                for (String k : keys) next.put(k);
+                fo.put("apps", next);
+                saveFoldersArray(arr);
+            } catch (Throwable ignored) {}
+            dismiss.run();
+        });
+        saveBtn.setBackground(theme.solidAccentButton(dpUnit, 14));
+        saveBtn.setTextColor(0xFFFFFFFF);
+        LinearLayout.LayoutParams sLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        sLp.topMargin = dp(8);
+        box.addView(saveBtn, sLp);
+
         holder[0] = showBottomSheetDialog(box);
+    }
+
+    private boolean toggleFolderTapLaunchFirst(int folderIdx) {
+        JSONArray arr = getFoldersArray();
+        JSONObject fo = arr.optJSONObject(folderIdx);
+        if (fo == null) return false;
+        boolean next = !fo.optBoolean("tapLaunchFirst", false);
+        try {
+            fo.put("tapLaunchFirst", next);
+            saveFoldersArray(arr);
+        } catch (Throwable ignored) {}
+        return next;
     }
 
     private void promptAddAppToFolder(final AppEntry app) {
         final JSONArray arr = getFoldersArray();
         String[] items = new String[arr.length() + 1];
-        for (int i = 0; i < arr.length(); i++) items[i] = "📁 " + arr.optJSONObject(i).optString("name");
-        items[arr.length()] = "＋ 新建胶囊文件夹…";
-        showSingleChoiceDialog("📁 将「" + app.label + "」加入文件夹", items, 0, w -> {
+        for (int i = 0; i < arr.length(); i++) items[i] = arr.optJSONObject(i).optString("name", "文件夹");
+        items[arr.length()] = "＋ 新建弹出式文件夹…";
+        showSingleChoiceDialog("将「" + app.label + "」加入文件夹", items, 0, w -> {
             if (w == arr.length()) {
                 promptCreateFolder(app);
                 return;
@@ -6162,6 +5883,12 @@ public class MainActivity extends Activity {
                 JSONObject fo = arr.getJSONObject(w);
                 JSONArray aList = fo.optJSONArray("apps");
                 if (aList == null) { aList = new JSONArray(); fo.put("apps", aList); }
+                for (int i = 0; i < aList.length(); i++) {
+                    if (app.idKey.equals(aList.optString(i))) {
+                        Toast.makeText(this, "「" + app.label + "」已在该文件夹中", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                }
                 aList.put(app.idKey);
                 saveFoldersArray(arr);
                 Toast.makeText(this, "已加入「" + fo.optString("name") + "」", Toast.LENGTH_SHORT).show();
@@ -6182,9 +5909,10 @@ public class MainActivity extends Activity {
     private final Runnable mediaProgressTicker = this::updateMediaCardUi;
 
     private void bindActiveMediaSession() {
-        if (mediaWaveCard == null) return;
+        if (niagaraHeaderView == null) return;
         if (!prefs.getBoolean(K_SHOW_MEDIA, true)) {
-            mediaWaveCard.setVisibility(View.GONE);
+            niagaraHeaderView.updateMedia(null, null, null, false, 0L, 0L);
+            applyOneHandedListPadding();
             return;
         }
         ComponentName cn = new ComponentName(this, NotificationHubService.class);
@@ -6212,56 +5940,35 @@ public class MainActivity extends Activity {
             }
             updateMediaCardUi();
         } catch (Throwable t) {
-            mediaWaveCard.setVisibility(View.GONE);
+            niagaraHeaderView.updateMedia(null, null, null, false, 0L, 0L);
+            applyOneHandedListPadding();
         }
     }
 
     private void updateMediaCardUi() {
         uiHandler.removeCallbacks(mediaProgressTicker);
-        if (mediaWaveCard == null) return;
+        if (niagaraHeaderView == null) return;
+        boolean wasVisible = niagaraHeaderView.isMediaVisible();
         MediaMetadata meta = activeMediaController == null ? null : activeMediaController.getMetadata();
         if (meta == null || TextUtils.isEmpty(meta.getString(MediaMetadata.METADATA_KEY_TITLE))) {
-            mediaWaveCard.setVisibility(View.GONE);
+            niagaraHeaderView.updateMedia(null, null, null, false, 0L, 0L);
+            if (wasVisible) applyOneHandedListPadding();
             return;
         }
         String title = meta.getString(MediaMetadata.METADATA_KEY_TITLE);
         String artist = meta.getString(MediaMetadata.METADATA_KEY_ARTIST);
-        if (mediaArtView != null) {
-            Bitmap art = meta.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART);
-            if (art == null) art = meta.getBitmap(MediaMetadata.METADATA_KEY_ART);
-            if (art != null) {
-                mediaArtView.setImageBitmap(art);
-                mediaArtView.setVisibility(View.VISIBLE);
-            } else {
-                mediaArtView.setVisibility(View.GONE);
-            }
-        }
-        mediaTitleView.setText("🎵 " + title);
-        mediaSubtitleView.setText(TextUtils.isEmpty(artist) ? "正在播放" : artist);
+        Bitmap art = meta.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART);
+        if (art == null) art = meta.getBitmap(MediaMetadata.METADATA_KEY_ART);
         PlaybackState st = activeMediaController.getPlaybackState();
         boolean playing = st != null && st.getState() == PlaybackState.STATE_PLAYING;
-        mediaPlayBtn.setText(playing ? "❚❚" : "▶\uFE0E");
-
         long dur = meta.getLong(MediaMetadata.METADATA_KEY_DURATION);
         long pos = st == null ? 0 : st.getPosition();
-        if (playing && st.getLastPositionUpdateTime() > 0) {
+        if (playing && st != null && st.getLastPositionUpdateTime() > 0) {
             pos += (long) ((SystemClock.elapsedRealtime() - st.getLastPositionUpdateTime()) * st.getPlaybackSpeed());
         }
-        if (dur > 0) {
-            pos = Math.min(pos, dur);
-            mediaProgressFill.setScaleX(pos / (float) dur);
-            mediaTimeView.setText(formatMmSs(pos) + " / " + formatMmSs(dur));
-            mediaTimeView.setVisibility(View.VISIBLE);
-        } else {
-            mediaTimeView.setVisibility(View.GONE);
-        }
-        mediaWaveCard.setVisibility(View.VISIBLE);
+        niagaraHeaderView.updateMedia(art, title, artist, playing, pos, dur);
+        if (!wasVisible) applyOneHandedListPadding();
         if (playing && isResumed && dur > 0) uiHandler.postDelayed(mediaProgressTicker, 1000);
-    }
-
-    private static String formatMmSs(long ms) {
-        long s = Math.max(0, ms / 1000);
-        return String.format(Locale.ROOT, "%02d:%02d", s / 60, s % 60);
     }
 
     private void triggerMediaTransport(int which) {
@@ -6288,10 +5995,11 @@ public class MainActivity extends Activity {
     private long nextEventId = -1, nextEventStart, nextEventEnd;
 
     private void refreshCalendarAgenda() {
-        if (agendaPill == null) return;
+        if (niagaraHeaderView == null) return;
         if (!prefs.getBoolean(K_SHOW_AGENDA, false)
                 || checkSelfPermission(Manifest.permission.READ_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
-            agendaPill.setVisibility(View.GONE);
+            niagaraHeaderView.updateAgenda(null);
+            applyOneHandedListPadding();
             return;
         }
         AppExecutors.getInstance().computation().execute(() -> {
@@ -6314,7 +6022,7 @@ public class MainActivity extends Activity {
                     b0 = c.getLong(2);
                     e0 = c.getLong(3);
                     SimpleDateFormat hm = new SimpleDateFormat("M月d日 HH:mm", Locale.CHINA);
-                    summary = "📅 近期日程：" + (TextUtils.isEmpty(t) ? "未命名日程" : t) + " · " + hm.format(new Date(b0));
+                    summary = (TextUtils.isEmpty(t) ? "未命名日程" : t) + " · " + hm.format(new Date(b0));
                 }
             } catch (Throwable ignored) {
             } finally {
@@ -6326,10 +6034,9 @@ public class MainActivity extends Activity {
                 nextEventId = fId;
                 nextEventStart = fb;
                 nextEventEnd = fe;
-                if (fSum == null) agendaPill.setVisibility(View.GONE);
-                else {
-                    agendaPill.setText(fSum);
-                    agendaPill.setVisibility(View.VISIBLE);
+                if (niagaraHeaderView != null) {
+                    niagaraHeaderView.updateAgenda(fSum);
+                    applyOneHandedListPadding();
                 }
             });
         });
@@ -6411,17 +6118,13 @@ public class MainActivity extends Activity {
         }
     }
 
-    private boolean dispatchDirectReply(NotificationHubService.NotifItem item, String text) {
-        return NotificationHubService.sendQuickReply(this, item, text);
-    }
-
     private void promptRenameApp(final AppEntry app) {
         final LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         final Dialog[] holder = new Dialog[1];
         final Runnable dismiss = () -> { if (holder[0] != null) holder[0].dismiss(); };
 
-        box.addView(makeText("✎ 自定义应用名称", 18f, theme.textPrimary, true));
+        box.addView(makeText("自定义应用名称", 18f, theme.textPrimary, true));
         TextView tip = makeText("原名：" + app.rawLabel + "（留空保存即可恢复默认名称）", 12.2f, theme.textSecondary, false);
         tip.setPadding(0, dp(3), 0, dp(10));
         box.addView(tip);
@@ -6443,7 +6146,7 @@ public class MainActivity extends Activity {
             } catch (Throwable ignored) {}
             dismiss.run();
         }));
-        TextView saveBtn = makeSheetButton("✓ 保存名称", () -> {
+        TextView saveBtn = makeSheetButton("保存名称", () -> {
             try {
                 JSONObject aliases = getAliasesJson();
                 String val = input.getText().toString().trim();
@@ -6457,42 +6160,6 @@ public class MainActivity extends Activity {
         saveBtn.setBackground(theme.solidAccentButton(dpUnit, 14));
         saveBtn.setTextColor(0xFFFFFFFF);
         btns.add(saveBtn);
-        addGridButtons(box, btns, 2);
-
-        holder[0] = showBottomSheetDialog(box);
-    }
-
-    private void promptBatteryKeepAliveGuide() {
-        final LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        final Dialog[] holder = new Dialog[1];
-        final Runnable dismiss = () -> { if (holder[0] != null) holder[0].dismiss(); };
-
-        box.addView(makeText("🔋 保持桌面毫秒级秒回（防后台清理）", 17.5f, theme.textPrimary, true));
-        TextView msg = makeText(
-                "1. 点击下方「忽略电池优化」并允许；\n"
-                + "2. ColorOS / 一加手机建议：进入「应用详情 → 耗电管理」，开启「允许完全后台行为」与「允许自启动」；\n"
-                + "3. 开启「通知使用权」后，系统会持久绑定本桌面服务，永不杀后台。",
-                13f, theme.textSecondary, false);
-        msg.setPadding(0, dp(8), 0, dp(12));
-        box.addView(msg);
-
-        List<TextView> btns = new ArrayList<>();
-        btns.add(makeSheetButton("⚙ 应用详情", () -> {
-            dismiss.run();
-            startIntentSafely(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getPackageName())));
-        }));
-        TextView optBtn = makeSheetButton("⚡ 忽略电池优化", () -> {
-            dismiss.run();
-            Intent i = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
-                    Uri.parse("package:" + getPackageName()));
-            if (!startIntentSafely(i)) {
-                startIntentSafely(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
-            }
-        });
-        optBtn.setBackground(theme.solidAccentButton(dpUnit, 14));
-        optBtn.setTextColor(0xFFFFFFFF);
-        btns.add(optBtn);
         addGridButtons(box, btns, 2);
 
         holder[0] = showBottomSheetDialog(box);
@@ -6767,8 +6434,8 @@ public class MainActivity extends Activity {
     }
 
     private void handleBackAction() {
-        if (appPopupScrim != null) {
-            dismissAppPopupCard(true);
+        if (popupController != null && popupController.isShowing()) {
+            popupController.dismiss(true);
             return;
         }
         if (currentSheetDialog != null && currentSheetDialog.isShowing()) {
@@ -6797,16 +6464,6 @@ public class MainActivity extends Activity {
     private AppEntry findAppByPackage(String pkgName) {
         if (pkgName == null) return null;
         for (AppEntry a : allApps) {
-            if (a.component != null && pkgName.equals(a.component.getPackageName())) {
-                return a;
-            }
-        }
-        return null;
-    }
-
-    private AppEntry findAppByPackageInSnapshot(List<AppEntry> snapshot, String pkgName) {
-        if (pkgName == null || snapshot == null) return null;
-        for (AppEntry a : snapshot) {
             if (a.component != null && pkgName.equals(a.component.getPackageName())) {
                 return a;
             }

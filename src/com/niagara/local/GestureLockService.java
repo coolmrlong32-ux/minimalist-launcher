@@ -51,11 +51,6 @@ public class GestureLockService extends AccessibilityService {
                 activePackages.remove(activePackages.size() - 1);
             }
         }
-
-        MainActivity act = MainActivity.activeInstance;
-        if (act != null && MainActivity.hasWindowFocusNow && act.isRecentDockVisible()) {
-            act.postRefreshRecentDockDelayed(900L);
-        }
     }
 
     @Override

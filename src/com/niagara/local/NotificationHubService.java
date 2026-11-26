@@ -343,19 +343,93 @@ public class NotificationHubService extends NotificationListenerService {
         return (hr / 24) + "天前";
     }
 
+    /** 返回该应用当前是否存在至少一条可清除的未读通知。 */
+    static boolean hasClearableNotifications(String pkg) {
+        if (pkg == null) return false;
+        List<NotifItem> items = allByPkg.get(pkg);
+        if (items == null || items.isEmpty()) return false;
+        for (NotifItem it : items) {
+            if (it != null && it.isClearable) return true;
+        }
+        return false;
+    }
+
+    /** 返回当前拥有可清除未读通知的包名列表，按最新消息时间倒序排列（供首页动态通知浮现使用）。 */
+    static List<String> getNotifiedPackagesOrderedByTime() {
+        Map<String, List<NotifItem>> src = allByPkg;
+        if (src == null || src.isEmpty()) return Collections.emptyList();
+        List<NotifItem> newestPerPkg = new ArrayList<>();
+        for (Map.Entry<String, List<NotifItem>> e : src.entrySet()) {
+            List<NotifItem> items = e.getValue();
+            if (items == null || items.isEmpty()) continue;
+            NotifItem best = null;
+            for (NotifItem it : items) {
+                if (it != null && it.isClearable) {
+                    if (best == null || it.postTime > best.postTime) {
+                        best = it;
+                    }
+                }
+            }
+            if (best != null) newestPerPkg.add(best);
+        }
+        if (newestPerPkg.isEmpty()) return Collections.emptyList();
+        Collections.sort(newestPerPkg, (a, b) -> Long.compare(b.postTime, a.postTime));
+        List<String> pkgs = new ArrayList<>(newestPerPkg.size());
+        for (NotifItem it : newestPerPkg) {
+            if (it.pkg != null) pkgs.add(it.pkg);
+        }
+        return pkgs;
+    }
+
     static int cancelAllForPackage(String pkg) {
         NotificationHubService s = instance;
         if (s == null || pkg == null) return 0;
         List<NotifItem> items = allByPkg.get(pkg);
         if (items == null || items.isEmpty()) return 0;
         int cleared = 0;
+        Set<String> clearedKeys = new HashSet<>();
         for (NotifItem it : items) {
             if (it != null && it.isClearable && it.key != null) {
                 try {
                     s.cancelNotification(it.key);
+                    clearedKeys.add(it.key);
                     cleared++;
                 } catch (Throwable ignored) {}
             }
+        }
+        if (cleared > 0) {
+            Map<String, List<NotifItem>> src = allByPkg;
+            Map<String, List<NotifItem>> nextAll = new HashMap<>();
+            Map<String, NotifItem> nextLatest = new HashMap<>();
+            Map<String, Integer> nextCounts = new HashMap<>();
+            for (Map.Entry<String, List<NotifItem>> e : src.entrySet()) {
+                String k = e.getKey();
+                if (!pkg.equals(k)) {
+                    List<NotifItem> list = e.getValue();
+                    if (list != null && !list.isEmpty()) {
+                        nextAll.put(k, list);
+                        nextCounts.put(k, list.size());
+                        nextLatest.put(k, list.get(0));
+                    }
+                    continue;
+                }
+                List<NotifItem> kept = new ArrayList<>();
+                for (NotifItem it : e.getValue()) {
+                    if (it != null && !clearedKeys.contains(it.key)) {
+                        kept.add(it);
+                    }
+                }
+                if (!kept.isEmpty()) {
+                    nextAll.put(k, kept);
+                    nextCounts.put(k, kept.size());
+                    nextLatest.put(k, kept.get(0));
+                }
+            }
+            allByPkg = nextAll;
+            latestByPkg = nextLatest;
+            countByPkg = nextCounts;
+            activePackages = new HashSet<>(nextAll.keySet());
+            notifyLauncher();
         }
         return cleared;
     }
