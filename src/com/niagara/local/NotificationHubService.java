@@ -1,13 +1,18 @@
 package com.niagara.local;
 
+import android.app.ActivityOptions;
 import android.app.Notification;
 import android.app.PendingIntent;
 import android.app.RemoteInput;
 import android.content.Context;
 import android.content.Intent;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.Parcelable;
+import android.os.UserHandle;
 import android.service.notification.NotificationListenerService;
 import android.service.notification.StatusBarNotification;
+import android.view.View;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -21,19 +26,22 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 本地通知中心服务 (v2.5.0 多通知聚合版)：
- * - 为应用行提供未读通知圆点、聚合消息数量、多条消息预览、一键消除通知、快捷回复及媒体会话权限；
- * - 提取系统天气应用的常驻/通知栏实时温度与天气状况供首页天气微件展示（100% 零网络权限）。
+ * 本地通知中心服务 (v2.9.1 深度应用内联动版)：
+ * - 为应用行提供未读通知圆点、聚合消息数量、MessagingStyle/InboxStyle 最新单条消息预览、一键消除通知、快捷回复及媒体会话权限；
+ * - 适配 Android 14/15 (API 34+) PendingIntent 后台启动授权（BAL），点击桌面通知直达应用内具体聊天或详情页；
+ * - 严格隔离应用分身 (UserHandle) 与媒体/常驻伪通知，并支持点击自动消通知与返回桌面实时校准。
  */
 public class NotificationHubService extends NotificationListenerService {
 
     static final class NotifItem {
         String pkg;
         String key;
+        UserHandle user;
         String title;
         String text;
         long postTime;
         boolean isClearable;
+        boolean autoCancel;
         PendingIntent contentIntent;
         Notification.Action quickReplyAction;
         /** 不含 RemoteInput 的常规动作（标记已读/暂停等），至多保留 2 个供 Pop-up 渲染为胶囊钮。 */
@@ -93,6 +101,82 @@ public class NotificationHubService extends NotificationListenerService {
         return clean;
     }
 
+    private static boolean userMatches(UserHandle notifUser, UserHandle appUser) {
+        if (notifUser == null || appUser == null) return true;
+        return notifUser.equals(appUser);
+    }
+
+    private static String scopeKey(String pkg, UserHandle u) {
+        return pkg + "#" + (u != null ? u.hashCode() : 0);
+    }
+
+    private static void extractRichTitleAndText(Notification n, Bundle ex, String[] outTitleText) {
+        CharSequence t = ex == null ? null : ex.getCharSequence(Notification.EXTRA_TITLE);
+        CharSequence tx = ex == null ? null : ex.getCharSequence(Notification.EXTRA_TEXT);
+        CharSequence bigTx = ex == null ? null : ex.getCharSequence(Notification.EXTRA_BIG_TEXT);
+        CharSequence subTx = ex == null ? null : ex.getCharSequence(Notification.EXTRA_SUB_TEXT);
+        String titleStr = t == null ? "" : t.toString().trim();
+        String textStr = tx == null ? "" : tx.toString().trim();
+
+        // 优先提取 MessagingStyle 最新一条对话消息（微信/Telegram/短信等）
+        if (ex != null) {
+            try {
+                Parcelable[] msgs = ex.getParcelableArray(Notification.EXTRA_MESSAGES);
+                if (msgs != null && msgs.length > 0) {
+                    for (int i = msgs.length - 1; i >= 0; i--) {
+                        if (!(msgs[i] instanceof Bundle)) continue;
+                        Bundle mb = (Bundle) msgs[i];
+                        CharSequence mText = mb.getCharSequence("text");
+                        if (mText == null || mText.toString().trim().isEmpty()) continue;
+                        String latestMsg = mText.toString().trim();
+                        String sender = "";
+                        CharSequence senderCs = mb.getCharSequence("sender");
+                        if (senderCs != null && senderCs.length() > 0) {
+                            sender = senderCs.toString().trim();
+                        } else if (Build.VERSION.SDK_INT >= 28) {
+                            try {
+                                android.app.Person person = mb.getParcelable("sender_person");
+                                if (person != null && person.getName() != null) {
+                                    sender = person.getName().toString().trim();
+                                }
+                            } catch (Throwable ignored) {}
+                        }
+                        if (titleStr.isEmpty() && !sender.isEmpty()) {
+                            titleStr = sender;
+                            textStr = latestMsg;
+                        } else if (!sender.isEmpty() && !sender.equals(titleStr) && !latestMsg.startsWith(sender + ":") && !latestMsg.startsWith(sender + "：")) {
+                            textStr = sender + "：" + latestMsg;
+                        } else {
+                            textStr = latestMsg;
+                        }
+                        break;
+                    }
+                }
+            } catch (Throwable ignored) {}
+
+            // 其次尝试 InboxStyle 末行（聚合多条消息时展示最新一行）
+            if (textStr.isEmpty()) {
+                try {
+                    CharSequence[] lines = ex.getCharSequenceArray(Notification.EXTRA_TEXT_LINES);
+                    if (lines != null && lines.length > 0) {
+                        for (int i = lines.length - 1; i >= 0; i--) {
+                            if (lines[i] != null && !lines[i].toString().trim().isEmpty()) {
+                                textStr = lines[i].toString().trim();
+                                break;
+                            }
+                        }
+                    }
+                } catch (Throwable ignored) {}
+            }
+        }
+
+        if (textStr.isEmpty() && bigTx != null) textStr = bigTx.toString().trim();
+        if (textStr.isEmpty() && subTx != null) textStr = subTx.toString().trim();
+        if (titleStr.isEmpty() && n.tickerText != null) titleStr = n.tickerText.toString().trim();
+        outTitleText[0] = titleStr;
+        outTitleText[1] = textStr;
+    }
+
     @Override
     public void onListenerConnected() {
         instance = this;
@@ -109,7 +193,6 @@ public class NotificationHubService extends NotificationListenerService {
         weatherSummary = "";
         weatherPackage = "";
         weatherIntent = null;
-        uiCallback = null;
         notifyLauncher();
     }
 
@@ -123,11 +206,23 @@ public class NotificationHubService extends NotificationListenerService {
         rebuildSnapshot();
     }
 
+    /** 回到桌面时由后台线程主动重校验系统当前活跃通知，防止应用内已读后桌面残留旧通知。 */
+    static void refreshSnapshotAsync() {
+        final NotificationHubService s = instance;
+        if (s == null) return;
+        AppExecutors.getInstance().computation().execute(() -> {
+            try {
+                s.rebuildSnapshot();
+            } catch (Throwable ignored) {}
+        });
+    }
+
     private void rebuildSnapshot() {
         Set<String> pkgs = new HashSet<>();
         Map<String, NotifItem> latestMap = new HashMap<>();
         Map<String, List<NotifItem>> listMap = new HashMap<>();
         Map<String, Integer> counts = new HashMap<>();
+        Map<String, PendingIntent> summaryIntents = new HashMap<>();
 
         String ongoingWeatherText = "";
         String ongoingWeatherPkg = "";
@@ -135,6 +230,7 @@ public class NotificationHubService extends NotificationListenerService {
         String regularWeatherText = "";
         String regularWeatherPkg = "";
         PendingIntent regularWeatherPi = null;
+        String[] titleText = new String[2];
         try {
             StatusBarNotification[] list = getActiveNotifications();
             if (list != null) {
@@ -142,15 +238,9 @@ public class NotificationHubService extends NotificationListenerService {
                     Notification n = sbn.getNotification();
                     if (n == null) continue;
                     Bundle ex = n.extras;
-                    CharSequence t = ex == null ? null : ex.getCharSequence(Notification.EXTRA_TITLE);
-                    CharSequence tx = ex == null ? null : ex.getCharSequence(Notification.EXTRA_TEXT);
-                    CharSequence bigTx = ex == null ? null : ex.getCharSequence(Notification.EXTRA_BIG_TEXT);
-                    CharSequence subTx = ex == null ? null : ex.getCharSequence(Notification.EXTRA_SUB_TEXT);
-                    String titleStr = t == null ? "" : t.toString();
-                    String textStr = tx == null ? "" : tx.toString();
-                    if (textStr.isEmpty() && bigTx != null) textStr = bigTx.toString();
-                    if (textStr.isEmpty() && subTx != null) textStr = subTx.toString();
-                    if (titleStr.isEmpty() && n.tickerText != null) titleStr = n.tickerText.toString();
+                    extractRichTitleAndText(n, ex, titleText);
+                    String titleStr = titleText[0];
+                    String textStr = titleText[1];
 
                     if (isWeatherNotification(sbn.getPackageName(), titleStr, textStr)) {
                         String badge = formatWeatherBadge(titleStr, textStr);
@@ -168,19 +258,32 @@ public class NotificationHubService extends NotificationListenerService {
                     }
 
                     if (sbn.isOngoing()) continue;
+                    if ((n.flags & Notification.FLAG_FOREGROUND_SERVICE) != 0) continue;
+                    if (Notification.CATEGORY_TRANSPORT.equals(n.category)) continue;
+                    if (ex != null && ex.containsKey(Notification.EXTRA_MEDIA_SESSION)) continue;
+
                     String pkgName = sbn.getPackageName();
+                    UserHandle sbnUser = sbn.getUser();
+                    if ((n.flags & Notification.FLAG_GROUP_SUMMARY) != 0) {
+                        if (n.contentIntent != null) {
+                            summaryIntents.put(scopeKey(pkgName, sbnUser), n.contentIntent);
+                        }
+                        continue;
+                    }
+                    if (titleStr.isEmpty() && textStr.isEmpty()) continue;
+
                     pkgs.add(pkgName);
-                    if ((n.flags & Notification.FLAG_GROUP_SUMMARY) != 0) continue;
-                    if (t == null && tx == null) continue;
 
                     long when = n.when > 0 ? n.when : sbn.getPostTime();
                     NotifItem item = new NotifItem();
                     item.pkg = pkgName;
                     item.key = sbn.getKey();
+                    item.user = sbnUser;
                     item.title = titleStr;
                     item.text = textStr;
                     item.postTime = when;
                     item.isClearable = sbn.isClearable();
+                    item.autoCancel = (n.flags & Notification.FLAG_AUTO_CANCEL) != 0;
                     item.contentIntent = n.contentIntent;
                     if (n.actions != null) {
                         List<Notification.Action> plain = null;
@@ -219,9 +322,15 @@ public class NotificationHubService extends NotificationListenerService {
 
         for (Map.Entry<String, List<NotifItem>> entry : listMap.entrySet()) {
             List<NotifItem> bucket = entry.getValue();
+            for (NotifItem item : bucket) {
+                if (item.contentIntent == null) {
+                    PendingIntent fallbackPi = summaryIntents.get(scopeKey(item.pkg, item.user));
+                    if (fallbackPi != null) item.contentIntent = fallbackPi;
+                }
+            }
             Collections.sort(bucket, (a, b) -> Long.compare(b.postTime, a.postTime));
-            if (bucket.size() > 5) {
-                entry.setValue(new ArrayList<>(bucket.subList(0, 5)));
+            if (bucket.size() > 8) {
+                entry.setValue(new ArrayList<>(bucket.subList(0, 8)));
             }
         }
 
@@ -256,14 +365,119 @@ public class NotificationHubService extends NotificationListenerService {
         }
     }
 
-    // ---------- v2.6.0 Pop-up 浮层辅助：查询 / 清除 / 快捷回复 ----------
+    // ---------- Android 14/15 PendingIntent 后台跳转授权与深度打开 ----------
+
+    private static Bundle buildLaunchOptionsBundle(View sourceView) {
+        try {
+            ActivityOptions ao;
+            if (sourceView != null && sourceView.getWidth() > 0 && sourceView.getHeight() > 0) {
+                ao = ActivityOptions.makeClipRevealAnimation(
+                        sourceView, 0, 0, sourceView.getWidth(), sourceView.getHeight());
+            } else {
+                ao = ActivityOptions.makeBasic();
+            }
+            if (Build.VERSION.SDK_INT >= 34) {
+                ao.setPendingIntentBackgroundActivityStartMode(
+                        ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED);
+            } else if (Build.VERSION.SDK_INT >= 33) {
+                try {
+                    ActivityOptions.class
+                            .getMethod("setPendingIntentBackgroundActivityLaunchAllowed", boolean.class)
+                            .invoke(ao, Boolean.TRUE);
+                } catch (Throwable ignored) {}
+            }
+            return ao.toBundle();
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    /** 兼容 Android 14/15 BAL 策略的 PendingIntent 发送工具，支持揭露动画与应用内深链跳转。 */
+    static boolean sendPendingIntentCompat(Context ctx, PendingIntent pi, Intent fillInIntent, View sourceView) {
+        if (pi == null) return false;
+        try {
+            Bundle opts = buildLaunchOptionsBundle(sourceView);
+            if (Build.VERSION.SDK_INT >= 23 && opts != null) {
+                pi.send(ctx, 0, fillInIntent, null, null, null, opts);
+            } else if (ctx != null && fillInIntent != null) {
+                pi.send(ctx, 0, fillInIntent);
+            } else {
+                pi.send();
+            }
+            return true;
+        } catch (Throwable t) {
+            try {
+                if (ctx != null && fillInIntent != null) pi.send(ctx, 0, fillInIntent);
+                else pi.send();
+                return true;
+            } catch (Throwable ignored) {
+                return false;
+            }
+        }
+    }
+
+    /** 打开单条通知对应的应用内页面，若通知带 FLAG_AUTO_CANCEL 则同步消除桌面残留。 */
+    static boolean openNotificationItem(Context ctx, NotifItem item, View sourceView) {
+        if (item == null || item.contentIntent == null) return false;
+        boolean sent = sendPendingIntentCompat(ctx, item.contentIntent, null, sourceView);
+        if (sent && item.autoCancel && item.isClearable && item.key != null) {
+            dismissNotification(item.key);
+        }
+        return sent;
+    }
+
+    // ---------- 应用/分身感知的通知查询与清除接口 ----------
 
     /** 按包名获取当前未被清除的活跃通知（最新在前，至多 5 条）。永不返回 null，返回只读快照。 */
     static List<NotifItem> getAllByPackage(String pkg) {
-        if (pkg == null) return Collections.emptyList();
+        return getAllForApp(pkg, null);
+    }
+
+    /** 按包名 + 用户分身获取活跃通知（最新在前，至多 5 条）。 */
+    static List<NotifItem> getAllForApp(String pkg, UserHandle user) {
+        if (pkg == null || pkg.isEmpty()) return Collections.emptyList();
         List<NotifItem> list = allByPkg.get(pkg);
         if (list == null || list.isEmpty()) return Collections.emptyList();
-        return Collections.unmodifiableList(new ArrayList<>(list));
+        List<NotifItem> out = new ArrayList<>();
+        for (NotifItem it : list) {
+            if (it != null && userMatches(it.user, user)) {
+                out.add(it);
+                if (out.size() >= 5) break;
+            }
+        }
+        return out.isEmpty() ? Collections.<NotifItem>emptyList() : Collections.unmodifiableList(out);
+    }
+
+    static NotifItem getLatestForApp(String pkg, UserHandle user) {
+        if (pkg == null || pkg.isEmpty()) return null;
+        if (user == null) return latestByPkg.get(pkg);
+        List<NotifItem> list = allByPkg.get(pkg);
+        if (list == null || list.isEmpty()) return null;
+        for (NotifItem it : list) {
+            if (it != null && userMatches(it.user, user)) return it;
+        }
+        return null;
+    }
+
+    static int getCountForApp(String pkg, UserHandle user) {
+        if (pkg == null || pkg.isEmpty()) return 0;
+        if (user == null) {
+            Integer c = countByPkg.get(pkg);
+            return c != null ? c : 0;
+        }
+        List<NotifItem> list = allByPkg.get(pkg);
+        if (list == null || list.isEmpty()) return 0;
+        int c = 0;
+        for (NotifItem it : list) {
+            if (it != null && userMatches(it.user, user)) c++;
+        }
+        return c;
+    }
+
+    static boolean hasUnreadForApp(String pkg, UserHandle user) {
+        if (pkg == null || pkg.isEmpty()) return false;
+        if (user == null) return activePackages.contains(pkg);
+        return getLatestForApp(pkg, user) != null;
     }
 
     /** 根据通知 Key 主动清除，并立即在本地快照中剔除，让桌面行摘要/计数即时刷新（系统回调随后会校准）。 */
@@ -317,8 +531,7 @@ public class NotificationHubService extends NotificationListenerService {
                 }
             }
             RemoteInput.addResultsToIntent(ris, fill, results);
-            pi.send(ctx, 0, fill);
-            return true;
+            return sendPendingIntentCompat(ctx, pi, fill, null);
         } catch (Throwable t) {
             return false;
         }
@@ -337,11 +550,15 @@ public class NotificationHubService extends NotificationListenerService {
 
     /** 返回该应用当前是否存在至少一条可清除的未读通知。 */
     static boolean hasClearableNotifications(String pkg) {
-        if (pkg == null) return false;
+        return hasClearableForApp(pkg, null);
+    }
+
+    static boolean hasClearableForApp(String pkg, UserHandle user) {
+        if (pkg == null || pkg.isEmpty()) return false;
         List<NotifItem> items = allByPkg.get(pkg);
         if (items == null || items.isEmpty()) return false;
         for (NotifItem it : items) {
-            if (it != null && it.isClearable) return true;
+            if (it != null && it.isClearable && userMatches(it.user, user)) return true;
         }
         return false;
     }
@@ -374,6 +591,10 @@ public class NotificationHubService extends NotificationListenerService {
     }
 
     static int cancelAllForPackage(String pkg) {
+        return cancelAllForApp(pkg, null);
+    }
+
+    static int cancelAllForApp(String pkg, UserHandle user) {
         NotificationHubService s = instance;
         if (s == null || pkg == null) return 0;
         List<NotifItem> items = allByPkg.get(pkg);
@@ -381,7 +602,7 @@ public class NotificationHubService extends NotificationListenerService {
         int cleared = 0;
         Set<String> clearedKeys = new HashSet<>();
         for (NotifItem it : items) {
-            if (it != null && it.isClearable && it.key != null) {
+            if (it != null && it.isClearable && it.key != null && userMatches(it.user, user)) {
                 try {
                     s.cancelNotification(it.key);
                     clearedKeys.add(it.key);

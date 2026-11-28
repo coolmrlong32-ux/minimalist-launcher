@@ -61,6 +61,8 @@ final class PopupCardController {
         Drawable loadShortcutIcon(ShortcutInfo sc);
         void startPopupShortcut(ShortcutInfo sc, MainActivity.AppEntry app);
         void launchApp(MainActivity.AppEntry app, View sourceView);
+        void launchAppOrNotification(MainActivity.AppEntry app, View sourceView);
+        void onPopupVisibilityChanged(boolean visible);
         void toggleFavorite(MainActivity.AppEntry app);
         void openRenameApp(MainActivity.AppEntry app);
         void openCustomAppIcon(MainActivity.AppEntry app);
@@ -99,6 +101,7 @@ final class PopupCardController {
         if (scrim == null) return;
         activeScrim = null;
         applyBackdropBlur(false);
+        host.onPopupVisibilityChanged(false);
         host.hideSoftKeyboard();
         final Runnable remove = () -> {
             ViewGroup p = (ViewGroup) scrim.getParent();
@@ -234,12 +237,12 @@ final class PopupCardController {
         // 1.5 可折叠线性矢量编辑工具条
         content.addView(toolsPanel);
 
-        // 2. 未读通知区（至多 3 条）
-        final List<NotificationHubService.NotifItem> notifs = NotificationHubService.getAllByPackage(pkg);
+        // 2. 未读通知区（至多 5 条，支持分身独立隔离与直达会话）
+        final List<NotificationHubService.NotifItem> notifs = NotificationHubService.getAllForApp(pkg, app.user);
         if (!notifs.isEmpty()) {
             LinearLayout nHdr = buildSectionHeader(VectorGlyphView.IC_BELL, "未读通知 " + notifs.size(),
                     "全部清除", () -> {
-                        int cleared = NotificationHubService.cancelAllForPackage(pkg);
+                        int cleared = NotificationHubService.cancelAllForApp(pkg, app.user);
                         Toast.makeText(act, cleared > 0 ? "已清除全部通知" : "没有可清除的通知", Toast.LENGTH_SHORT).show();
                         dismiss(true);
                     });
@@ -247,11 +250,11 @@ final class PopupCardController {
 
             int shown = 0;
             for (NotificationHubService.NotifItem n : notifs) {
-                if (shown++ >= 3) break;
+                if (shown++ >= 5) break;
                 LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
                 rlp.topMargin = dp(5);
-                content.addView(buildPopupNotifRow(n), rlp);
+                content.addView(buildPopupNotifRow(n, app), rlp);
             }
         }
 
@@ -265,7 +268,7 @@ final class PopupCardController {
             for (final MainActivity.AppEntry child : popupChildren) {
                 content.addView(buildMemberAppRow(child, v -> {
                     dismiss(true);
-                    host.launchApp(child, v);
+                    host.launchAppOrNotification(child, v);
                 }, v -> {
                     v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
                     host.removeAppPopupChild(app, child);
@@ -401,7 +404,7 @@ final class PopupCardController {
                 count++;
                 content.addView(buildMemberAppRow(member, v -> {
                     dismiss(true);
-                    host.launchApp(member, v);
+                    host.launchAppOrNotification(member, v);
                 }, v -> {
                     v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
                     showAppPopup(anchorView, member, true);
@@ -540,18 +543,29 @@ final class PopupCardController {
         LinearLayout cell = new LinearLayout(act);
         cell.setOrientation(LinearLayout.VERTICAL);
         cell.setGravity(Gravity.CENTER_HORIZONTAL);
-        cell.setPadding(dp(2), dp(4), dp(2), dp(4));
+        cell.setPadding(dp(2), dp(5), dp(2), dp(5));
 
         VectorGlyphView gv = new VectorGlyphView(act, glyphType, color, host.getDp());
         cell.addView(gv, new LinearLayout.LayoutParams(dp(17), dp(17)));
 
-        TextView tv = makeText(label, 10.4f, color, false);
+        TextView tv = makeText(label, 10.6f, color, false);
+        tv.setGravity(Gravity.CENTER);
         tv.setSingleLine(true);
         tv.setEllipsize(TextUtils.TruncateAt.END);
-        tv.setPadding(0, dp(3), 0, 0);
-        cell.addView(tv);
+        tv.setPadding(0, dp(4), 0, 0);
+        cell.addView(tv, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         cell.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        cell.setOnTouchListener((v, ev) -> {
+            int a = ev.getActionMasked();
+            if (a == MotionEvent.ACTION_DOWN) {
+                v.animate().scaleX(0.92f).scaleY(0.92f).alpha(0.72f).setDuration(65).start();
+            } else if (a == MotionEvent.ACTION_UP || a == MotionEvent.ACTION_CANCEL) {
+                v.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(110).start();
+            }
+            return false;
+        });
         if (onClick != null) {
             cell.setOnClickListener(v -> {
                 v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
@@ -614,7 +628,7 @@ final class PopupCardController {
 
         String pkg = a.component != null ? a.component.getPackageName() : "";
         NotificationHubService.NotifItem notif = host.isInlineNotifEnabled()
-                ? NotificationHubService.latestByPkg.get(pkg) : null;
+                ? NotificationHubService.getLatestForApp(pkg, a.user) : null;
         if (notif != null) {
             String preview = (notif.title.isEmpty() ? "" : notif.title + "：") + notif.text;
             TextView subTv = makeText(preview, 11.3f, theme.textSecondary, false);
@@ -624,7 +638,7 @@ final class PopupCardController {
         }
         aRow.addView(col, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-        if (notif == null && NotificationHubService.activePackages.contains(pkg)) {
+        if (notif == null && NotificationHubService.hasUnreadForApp(pkg, a.user)) {
             View dot = new View(act);
             GradientDrawable dbg = new GradientDrawable();
             dbg.setShape(GradientDrawable.OVAL);
@@ -640,8 +654,8 @@ final class PopupCardController {
         return aRow;
     }
 
-    /** 单条通知微卡片：标题/摘要/相对时间、矢量 × 与右滑清除、常规动作胶囊、内联快捷回复。 */
-    private View buildPopupNotifRow(final NotificationHubService.NotifItem n) {
+    /** 单条通知微卡片：标题/摘要/相对时间、矢量 × 与右滑清除、常规动作胶囊、内联快捷回复与深度跳转。 */
+    private View buildPopupNotifRow(final NotificationHubService.NotifItem n, final MainActivity.AppEntry ownerApp) {
         final Activity act = host.getActivity();
         final AuroraTheme theme = host.getThemeObj();
         final LinearLayout row = new LinearLayout(act);
@@ -687,12 +701,8 @@ final class PopupCardController {
                 cap.setSingleLine(true);
                 cap.setEllipsize(TextUtils.TruncateAt.END);
                 cap.setOnClickListener(v -> {
-                    try {
-                        nAct.actionIntent.send();
-                        Toast.makeText(act, "已执行：" + nAct.title, Toast.LENGTH_SHORT).show();
-                    } catch (Throwable t) {
-                        Toast.makeText(act, "操作已失效", Toast.LENGTH_SHORT).show();
-                    }
+                    boolean ok = NotificationHubService.sendPendingIntentCompat(act, nAct.actionIntent, null, v);
+                    Toast.makeText(act, ok ? ("已执行：" + nAct.title) : "操作已失效", Toast.LENGTH_SHORT).show();
                     dismiss(true);
                 });
                 LinearLayout.LayoutParams capLp = new LinearLayout.LayoutParams(
@@ -733,16 +743,13 @@ final class PopupCardController {
             row.addView(replyRow);
         }
 
-        if (n.contentIntent != null) {
-            row.setOnClickListener(v -> {
-                try {
-                    n.contentIntent.send();
-                    dismiss(true);
-                } catch (Throwable t) {
-                    Toast.makeText(act, "通知跳转已失效", Toast.LENGTH_SHORT).show();
-                }
-            });
-        }
+        row.setOnClickListener(v -> {
+            dismiss(true);
+            boolean opened = NotificationHubService.openNotificationItem(act, n, v);
+            if (!opened && ownerApp != null) {
+                host.launchApp(ownerApp, v);
+            }
+        });
         if (n.isClearable) attachSwipeToDismiss(row, n);
         return row;
     }
@@ -813,6 +820,7 @@ final class PopupCardController {
         card.setVerticalScrollBarEnabled(false);
         card.setOverScrollMode(View.OVER_SCROLL_NEVER);
         card.setBackground(popupCardBackground());
+        card.setElevation(dp(14));
         card.setClipToOutline(true);
         card.setOutlineProvider(android.view.ViewOutlineProvider.BACKGROUND);
         card.setClickable(true);
@@ -924,6 +932,7 @@ final class PopupCardController {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         activeScrim = scrim;
         applyBackdropBlur(true);
+        host.onPopupVisibilityChanged(true);
 
         card.setPivotX(0f);
         card.setPivotY(Math.max(0f, Math.min(curMetrics[1], anchorTop + anchorH * 0.5f - curMetrics[0])));

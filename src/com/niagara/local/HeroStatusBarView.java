@@ -255,8 +255,9 @@ final class HeroStatusBarView extends LinearLayout {
         else if (raw.contains("晴")) cond = isDay ? WeatherGlyphView.COND_SUN : WeatherGlyphView.COND_MOON;
         weatherIcon.setCondition(cond);
 
-        String cleaned = raw.replaceAll("[\\p{So}\\p{Cs}\\uFE0F]", "").trim();
-        cleaned = cleaned.replace("°C", "°").replace("℃", "°").replace(" · ", " ").replaceAll("\\s+", " ");
+        String cleaned = raw.replace("°C", "°").replace("℃", "°")
+                .replaceAll("[\\p{Cs}\\uFE0F\\u200D\\u2600-\\u27BF]", "")
+                .replace(" · ", " ").replaceAll("\\s+", " ").trim();
         if (cleaned.isEmpty()) cleaned = "天气";
 
         int spIdx = cleaned.indexOf(' ');

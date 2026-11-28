@@ -69,7 +69,7 @@ final class SettingsSheetController {
         void applyThemePreset(int styleIdx);
         void pickGalleryWallpaper();
         void onDimPercentChanged(int pct);
-        void onWallLockOnlyChanged(boolean lockOnly);
+        void onSyncLockWallpaperChanged(boolean syncLock);
         void onFlowAnimChanged(boolean on);
         void showIconShapePicker();
         void showIconPackPicker();
@@ -155,7 +155,7 @@ final class SettingsSheetController {
 
         LinearLayout titleCol = new LinearLayout(ctx);
         titleCol.setOrientation(LinearLayout.VERTICAL);
-        String verName = "2.9.0";
+        String verName = "2.9.1";
         try {
             String vn = ctx.getPackageManager().getPackageInfo(ctx.getPackageName(), 0).versionName;
             if (vn != null && !vn.isEmpty()) verName = vn;
@@ -385,8 +385,8 @@ final class SettingsSheetController {
         });
 
         addDivider(ctx, theme, dp, moreAppearanceBox);
-        addSwitchRow(ctx, tf, host, theme, dp, moreAppearanceBox, VectorGlyphView.IC_WALLPAPER, "仅同步锁屏壁纸", "日出日落仅更新锁屏，保留当前桌面壁纸",
-                prefs.getBoolean("wall_lock_only_v1", false), host::onWallLockOnlyChanged);
+        addSwitchRow(ctx, tf, host, theme, dp, moreAppearanceBox, VectorGlyphView.IC_WALLPAPER, "同步更新系统锁屏壁纸", "默认关闭以保护原有锁屏；开启后昼夜切换将同步至锁屏",
+                prefs.getBoolean("sync_lock_wallpaper_v1", false), host::onSyncLockWallpaperChanged);
 
         addDivider(ctx, theme, dp, moreAppearanceBox);
         addSwitchRow(ctx, tf, host, theme, dp, moreAppearanceBox, VectorGlyphView.IC_SPARK, "极光流体微动", "触摸壁纸时的微光涟漪反馈",
