@@ -63,6 +63,14 @@ final class WeatherSyncEngine {
         long ts = sp.getLong(K_WEATHER_TIME, 0L);
         if (text == null || text.isEmpty()) return "";
         if (System.currentTimeMillis() - ts > CACHE_VALID_MS) return "";
+        if (containsAsciiLetters(text)) {
+            int spIdx = text.indexOf(' ');
+            if (spIdx > 0 && spIdx < text.length() - 1) {
+                String head = text.substring(0, spIdx);
+                String tail = text.substring(spIdx + 1).trim();
+                text = head + " " + simplifyCondition(englishCondToChinese(tail));
+            }
+        }
         return text;
     }
 
@@ -258,10 +266,15 @@ final class WeatherSyncEngine {
             if (zhArr != null && zhArr.length() > 0) {
                 cond = zhArr.getJSONObject(0).optString("value", "").trim();
             }
-            if (cond.isEmpty()) {
+            if (cond.isEmpty() || containsAsciiLetters(cond)) {
+                String eng = cond;
                 JSONArray descArr = cur.optJSONArray("weatherDesc");
                 if (descArr != null && descArr.length() > 0) {
-                    cond = englishCondToChinese(descArr.getJSONObject(0).optString("value", ""));
+                    String descVal = descArr.getJSONObject(0).optString("value", "");
+                    if (!descVal.isEmpty()) eng = descVal;
+                }
+                if (!eng.isEmpty()) {
+                    cond = englishCondToChinese(eng);
                 }
             }
             cond = simplifyCondition(cond);
@@ -271,6 +284,15 @@ final class WeatherSyncEngine {
         } catch (Throwable ignored) {
             return "";
         }
+    }
+
+    private static boolean containsAsciiLetters(String s) {
+        if (s == null) return false;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) return true;
+        }
+        return false;
     }
 
     private static String httpGet(String urlStr, int timeoutMs) throws Exception {

@@ -185,8 +185,8 @@ final class AuroraBackdropView extends View {
     }
 
     private Bitmap ensureDesktopSceneBitmap(int w, int h, int styleIdx, int phase) {
-        int bw = Math.max(360, w / 2);
-        int bh = Math.max(720, h / 2);
+        int bw = Math.max(360, Math.min(w, 1080));
+        int bh = Math.max(720, Math.min(h, 2400));
         if (desktopSceneBmp != null && !desktopSceneBmp.isRecycled()
                 && desktopSceneStyle == styleIdx && desktopScenePhase == phase
                 && desktopSceneW == bw && desktopSceneH == bh) {
@@ -196,6 +196,7 @@ final class AuroraBackdropView extends View {
         Bitmap bmp = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888);
         Canvas cv = new Canvas(bmp);
         drawSceneByStyle(cv, bw, bh, styleIdx, phase);
+        applyTriangularDither(bmp);
         desktopSceneBmp = bmp;
         desktopSceneStyle = styleIdx;
         desktopScenePhase = phase;
@@ -299,11 +300,11 @@ final class AuroraBackdropView extends View {
 
     static void syncDayNightWallpaperIfNeeded(final Context ctx, final SharedPreferences prefs) {
         if (syncingDayNightWall) return;
+        int themeIdx = prefs.getInt("theme_idx", AuroraTheme.IDX_DEFAULT);
+        if (themeIdx >= 6) return;
         int style = prefs.getInt("wall_style_idx", -1);
-        if (style < 0) {
-            style = prefs.getInt("theme_idx", 0);
-        }
-        if (style < 0 || style > 5) style = 0;
+        if (style < 0) return;
+        if (style > 5) style = 0;
         final int styleIdx = style;
         final int phase = AuroraTheme.resolveSolarPhase(ctx);
         int lastPhase = prefs.getInt("wall_applied_phase_v3", -1);
@@ -350,7 +351,7 @@ final class AuroraBackdropView extends View {
     }
 
     static File wallCacheFile(Context ctx) {
-        return new File(ctx.getFilesDir(), "niagara_wall.jpg");
+        return new File(ctx.getFilesDir(), "niagara_wall.png");
     }
 
     static boolean isWallpaperBright(Context ctx) {
@@ -374,15 +375,17 @@ final class AuroraBackdropView extends View {
     static void saveAndApplySystemWallpaper(Context ctx, Bitmap bmp) throws Exception {
         saveWallpaperCache(ctx, bmp);
         WallpaperManager wm = WallpaperManager.getInstance(ctx);
-        boolean lockOnly = ctx.getSharedPreferences("niagara_local", Context.MODE_PRIVATE)
-                .getBoolean("wall_lock_only_v1", false);
+        boolean syncLock = ctx.getSharedPreferences("niagara_local", Context.MODE_PRIVATE)
+                .getBoolean("sync_lock_wallpaper_v1", false);
         try {
-            if (!lockOnly) {
-                wm.setBitmap(bmp, null, true, WallpaperManager.FLAG_SYSTEM);
+            wm.setBitmap(bmp, null, true, WallpaperManager.FLAG_SYSTEM);
+            if (syncLock) {
+                wm.setBitmap(bmp, null, true, WallpaperManager.FLAG_LOCK);
             }
-            wm.setBitmap(bmp, null, true, WallpaperManager.FLAG_LOCK);
         } catch (Throwable t) {
-            wm.setBitmap(bmp, null, true, lockOnly ? WallpaperManager.FLAG_LOCK : (WallpaperManager.FLAG_SYSTEM | WallpaperManager.FLAG_LOCK));
+            wm.setBitmap(bmp, null, true, syncLock
+                    ? (WallpaperManager.FLAG_SYSTEM | WallpaperManager.FLAG_LOCK)
+                    : WallpaperManager.FLAG_SYSTEM);
         }
     }
 
@@ -401,7 +404,7 @@ final class AuroraBackdropView extends View {
                 .putInt("wall_bot_color", botCol)
                 .apply();
         try (FileOutputStream out = new FileOutputStream(wallCacheFile(ctx))) {
-            bmp.compress(Bitmap.CompressFormat.JPEG, 95, out);
+            bmp.compress(Bitmap.CompressFormat.PNG, 100, out);
         } catch (Throwable ignored) {}
     }
 
@@ -416,7 +419,46 @@ final class AuroraBackdropView extends View {
         Bitmap bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
         Canvas cv = new Canvas(bmp);
         drawSceneByStyle(cv, w, h, styleIdx, phase);
+        applyTriangularDither(bmp);
         return bmp;
+    }
+
+    /**
+     * 逐行三角分布空间抖动 (TPDF Debanding)：
+     * 在 8-bit 深色缓变渐变中叠加 [-2, +2] 三角分布微扰，彻底打散 OLED 屏可见的同心圆水波纹色阶断层，
+     * 仅申请单行 int[w] 缓冲，零整图额外内存开销。
+     */
+    private static void applyTriangularDither(Bitmap bmp) {
+        if (bmp == null || bmp.isRecycled() || !bmp.isMutable()) return;
+        int w = bmp.getWidth();
+        int h = bmp.getHeight();
+        if (w <= 0 || h <= 0) return;
+        int[] row = new int[w];
+        for (int y = 0; y < h; y++) {
+            bmp.getPixels(row, 0, w, 0, y, w, 1);
+            int ySalt = y * 0x27d4eb2d;
+            for (int x = 0; x < w; x++) {
+                int h1 = (x * 0x165667b1) ^ ySalt;
+                h1 = (h1 ^ (h1 >>> 15)) * 0x85ebca6b;
+                h1 ^= (h1 >>> 13);
+                int h2 = ((x + 17) * 0x2c1b3c6d) ^ ((y + 31) * 0x297a2d39);
+                h2 = (h2 ^ (h2 >>> 16)) * 0xc2b2ae35;
+                h2 ^= (h2 >>> 15);
+                int delta = ((h1 & 3) == 3 ? 1 : (h1 & 1)) - ((h2 & 3) == 3 ? 1 : (h2 & 1))
+                        + (((h1 >>> 4) & 1) - ((h2 >>> 4) & 1));
+                if (delta == 0) continue;
+                int p = row[x];
+                int a = p & 0xFF000000;
+                int r = ((p >>> 16) & 0xFF) + delta;
+                int g = ((p >>> 8) & 0xFF) + delta;
+                int b = (p & 0xFF) + delta;
+                if (r < 0) r = 0; else if (r > 255) r = 255;
+                if (g < 0) g = 0; else if (g > 255) g = 255;
+                if (b < 0) b = 0; else if (b > 255) b = 255;
+                row[x] = a | (r << 16) | (g << 8) | b;
+            }
+            bmp.setPixels(row, 0, w, 0, y, w, 1);
+        }
     }
 
     static void drawSceneByStyle(Canvas cv, int w, int h, int styleIdx, int phase) {
@@ -450,7 +492,7 @@ final class AuroraBackdropView extends View {
     }
 
     private static void drawCelestialDisc(Canvas cv, float cx, float cy, float r, int coreColor, int haloColor) {
-        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.DITHER_FLAG);
         p.setShader(new RadialGradient(cx, cy, r * 3.8f,
                 new int[]{haloColor, AuroraTheme.withAlpha(haloColor, 0x44), haloColor & 0x00FFFFFF},
                 new float[]{0f, 0.45f, 1f}, Shader.TileMode.CLAMP));
@@ -513,7 +555,7 @@ final class AuroraBackdropView extends View {
         path.cubicTo(w * 0.80f, h * (peak2 - amp), w * 0.92f, h * (baseY - amp * 0.5f), w, h * (baseY + 0.03f));
         path.lineTo(w, h);
         path.close();
-        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.DITHER_FLAG);
         p.setShader(new LinearGradient(0, h * (baseY - 0.10f), 0, h,
                 color, AuroraTheme.blendColors(color, 0xFF0A1014, 0.28f), Shader.TileMode.CLAMP));
         cv.drawPath(path, p);
@@ -536,7 +578,7 @@ final class AuroraBackdropView extends View {
             w1 = 0x998ACDF0; w2 = 0xAA5BAEE0; w3 = 0xBB3B88BD; glow = 0x66FFFFFF;
         }
         drawSkyGradient(cv, w, h, bgTop, bgMid, bgBot);
-        Paint gp = new Paint(Paint.ANTI_ALIAS_FLAG);
+        Paint gp = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.DITHER_FLAG);
         gp.setShader(new RadialGradient(w * 0.28f, h * 0.44f, w * 0.68f, glow, glow & 0x00FFFFFF, Shader.TileMode.CLAMP));
         cv.drawCircle(w * 0.28f, h * 0.44f, w * 0.68f, gp);
         drawWaveRibbon(cv, w, h, 0.44f, 0.09f, w1);
@@ -600,7 +642,7 @@ final class AuroraBackdropView extends View {
         if (phase == WeatherSyncEngine.SOLAR_NIGHT) {
             drawSoftStars(cv, w, h, 3099, 72, 0xFFEDE9FE);
         }
-        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.DITHER_FLAG);
         p.setShader(new RadialGradient(w * 0.24f, h * 0.56f, w * 0.68f, c1, c1 & 0x00FFFFFF, Shader.TileMode.CLAMP));
         cv.drawCircle(w * 0.24f, h * 0.56f, w * 0.68f, p);
         p.setShader(new RadialGradient(w * 0.78f, h * 0.66f, w * 0.72f, c2, c2 & 0x00FFFFFF, Shader.TileMode.CLAMP));
@@ -630,23 +672,34 @@ final class AuroraBackdropView extends View {
         drawRidgeLayer(cv, w, h, 0.74f, 0.05f, 0.69f, 0.78f, ink2);
     }
 
-    // 5: 纯色柔光 · 护眼（极简低饱和暖炭灰，无山峦纯质感）
+    // 5: 纯色柔光 · 护眼（极简低饱和暖炭灰，无山峦纯质感，多控点防断层）
     private static void drawEyeCareSolidWallpaper(Canvas cv, int w, int h, int phase) {
         int bgTop, bgMid, bgBot, glow;
         if (phase == WeatherSyncEngine.SOLAR_SUNRISE || phase == WeatherSyncEngine.SOLAR_SUNSET) {
             bgTop = 0xFFF0E3D4; bgMid = 0xFFEEDCC8; bgBot = 0xFFE6CEB7;
-            glow = 0x44E8A878;
+            glow = 0x3CE8A878;
         } else if (phase == WeatherSyncEngine.SOLAR_NIGHT) {
-            bgTop = 0xFF1A1C22; bgMid = 0xFF21242C; bgBot = 0xFF282C36;
-            glow = 0x44505A70;
+            bgTop = 0xFF1A1C22; bgMid = 0xFF20232B; bgBot = 0xFF272B35;
+            glow = 0x36505A70;
         } else {
             bgTop = 0xFFF2F1EC; bgMid = 0xFFECEBE5; bgBot = 0xFFE5E4DD;
-            glow = 0x38D6DEE8;
+            glow = 0x34D6DEE8;
         }
         drawSkyGradient(cv, w, h, bgTop, bgMid, bgBot);
-        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-        p.setShader(new RadialGradient(w * 0.5f, h * 0.42f, w * 0.9f, glow, glow & 0x00FFFFFF, Shader.TileMode.CLAMP));
-        cv.drawCircle(w * 0.5f, h * 0.42f, w * 0.9f, p);
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.DITHER_FLAG);
+        int baseAlpha = (glow >>> 24) & 0xFF;
+        int rgb = glow & 0x00FFFFFF;
+        p.setShader(new RadialGradient(
+                w * 0.5f, h * 0.42f, w * 0.95f,
+                new int[]{
+                        glow,
+                        (Math.round(baseAlpha * 0.58f) << 24) | rgb,
+                        (Math.round(baseAlpha * 0.22f) << 24) | rgb,
+                        rgb
+                },
+                new float[]{0f, 0.36f, 0.70f, 1f},
+                Shader.TileMode.CLAMP));
+        cv.drawCircle(w * 0.5f, h * 0.42f, w * 0.95f, p);
     }
 
     private static boolean computeBright(Bitmap b) {

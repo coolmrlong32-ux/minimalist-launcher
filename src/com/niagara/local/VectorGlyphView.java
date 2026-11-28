@@ -242,8 +242,15 @@ final class VectorGlyphView extends View {
                 c.drawCircle(cx + u * 0.72f, cy, dr, fillP);
                 break;
             case IC_EDIT:
-                c.drawLine(cx - u * 0.65f, cy + u * 0.65f, cx + u * 0.55f, cy - u * 0.55f, p);
-                c.drawLine(cx - u * 0.85f, cy + u * 0.85f, cx + u * 0.85f, cy + u * 0.85f, p);
+                path.reset();
+                path.moveTo(cx - u * 0.78f, cy + u * 0.78f);
+                path.lineTo(cx - u * 0.66f, cy + u * 0.24f);
+                path.lineTo(cx + u * 0.34f, cy - u * 0.76f);
+                path.lineTo(cx + u * 0.76f, cy - u * 0.34f);
+                path.lineTo(cx - u * 0.24f, cy + u * 0.66f);
+                path.close();
+                c.drawPath(path, p);
+                c.drawLine(cx + u * 0.14f, cy + u * 0.78f, cx + u * 0.82f, cy + u * 0.78f, p);
                 break;
             case IC_INFO:
                 c.drawCircle(cx, cy, u * 0.92f, p);

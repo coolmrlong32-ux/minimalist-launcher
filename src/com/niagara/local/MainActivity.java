@@ -547,6 +547,10 @@ public class MainActivity extends Activity {
         }
         if (backdropView != null) backdropView.setScreenVisible(true);
 
+        NotificationHubService.refreshSnapshotAsync();
+        uiHandler.removeCallbacks(refreshNotificationsTask);
+        uiHandler.post(refreshNotificationsTask);
+
         uiHandler.removeCallbacks(resumeRefreshTask);
         uiHandler.postDelayed(resumeRefreshTask, 900L);
     }
@@ -559,7 +563,6 @@ public class MainActivity extends Activity {
         uiHandler.removeCallbacks(resumeRefreshTask);
         if (backdropView != null) backdropView.setScreenVisible(false);
         uiHandler.removeCallbacks(mediaProgressTicker);
-        uiHandler.removeCallbacks(refreshNotificationsTask);
         uiHandler.removeCallbacks(clearHighlightTask);
     }
 
@@ -648,6 +651,8 @@ public class MainActivity extends Activity {
         // 2. 主纵向一体流容器（Unified Stream）
         final LinearLayout mainColumn = new LinearLayout(this);
         mainColumn.setOrientation(LinearLayout.VERTICAL);
+        mainColumn.setClipChildren(false);
+        mainColumn.setClipToPadding(false);
         workspaceMainColumn = mainColumn;
 
         // 2.1 原生 Niagara 顶部一览 HeaderView（时钟 + 日期农历天气 + 按需电量 + 矢量日程/便签 + 极简媒体条 + 原生小组件）
@@ -687,10 +692,12 @@ public class MainActivity extends Activity {
         searchBarCard = buildSearchBarCard();
         searchBarCard.setElevation(dp(10));
 
-        // 2.3 主应用一体流 ListView
+        // 2.3 主应用一体流 ListView（上下 28dp 羽化渐隐，严格避开状态栏与导航条）
         streamListView = new ListView(this);
         streamListView.setDivider(null);
         streamListView.setVerticalScrollBarEnabled(false);
+        streamListView.setVerticalFadingEdgeEnabled(true);
+        streamListView.setFadingEdgeLength(dp(28));
         streamListView.setOverScrollMode(View.OVER_SCROLL_NEVER);
         streamListView.setSelector(android.R.color.transparent);
         streamListView.setClipToPadding(false);
@@ -922,7 +929,7 @@ public class MainActivity extends Activity {
                 currentImeLiftPx = Math.max(0f, currentImeBottomPx - currentNavBottomPx);
             }
 
-            mainColumn.setPadding(dp(22), 0, dp(34), 0);
+            mainColumn.setPadding(0, topInset, 0, 0);
             applySearchBarInsets();
             applyOneHandedListPadding();
 
@@ -1015,32 +1022,33 @@ public class MainActivity extends Activity {
         hideSoftKeyboard();
     }
 
-    // ---------- 边缘波浪导轨 ↔ 主列表物理联动（安全区内微推 + 图标视差，零左边界裁切） ----------
+    // ---------- 边缘波浪导轨 ↔ 主列表物理联动（左缘锚定 + 安全正向内敛微推，彻底杜绝左侧裁切） ----------
     private static final float WAVE_LIST_SIGMA_DP = 72f;
-    private static final float WAVE_LIST_PUSH_DP = 12f;
-    private static final float WAVE_LIST_ICON_PARALLAX_DP = 4f;
-    private static final float WAVE_LIST_SCALE_GAIN = 0.03f;
+    private static final float WAVE_LIST_PUSH_RIGHT_DP = 8f;
+    private static final float WAVE_LIST_PUSH_LEFT_DP = 10f;
+    private static final float WAVE_LIST_ICON_PARALLAX_DP = 2.5f;
+    private static final float WAVE_LIST_SCALE_GAIN = 0.025f;
     private static final long WAVE_REBOUND_MS = 180L;
 
     private boolean waveCouplingActive = false;
     private float waveCouplingTouchY = -1f;
-    private float waveCouplingDir = -1f;
+    private float waveCouplingPushDp = WAVE_LIST_PUSH_RIGHT_DP;
     private ValueAnimator waveReboundAnim;
     private final int[] waveListLoc = new int[2];
 
     private void setupWaveListCoupling() {
-        bindWaveCoupling(rightWaveBar, -1f);
-        bindWaveCoupling(leftGhostWaveBar, 1f);
+        bindWaveCoupling(rightWaveBar, WAVE_LIST_PUSH_RIGHT_DP);
+        bindWaveCoupling(leftGhostWaveBar, WAVE_LIST_PUSH_LEFT_DP);
     }
 
-    private void bindWaveCoupling(NiagaraWaveView bar, final float dir) {
+    private void bindWaveCoupling(NiagaraWaveView bar, final float pushDp) {
         if (bar == null) return;
         bar.setOnWaveScrubListener(new NiagaraWaveView.OnWaveScrubListener() {
             @Override
             public void onWaveScrubStart() {
                 cancelWaveRebound();
                 waveCouplingActive = true;
-                waveCouplingDir = dir;
+                waveCouplingPushDp = pushDp;
             }
 
             @Override
@@ -1077,22 +1085,27 @@ public class MainActivity extends Activity {
 
     private void applyItemWaveDisplacement(View itemView, float factor) {
         float f = Math.max(0f, Math.min(1f, factor));
-        itemView.setTranslationX(waveCouplingDir * dpUnit * WAVE_LIST_PUSH_DP * f);
+        itemView.setPivotX(0f);
+        itemView.setPivotY(itemView.getHeight() * 0.5f);
+        itemView.setTranslationX(dpUnit * waveCouplingPushDp * f);
         float scale = 1.0f + WAVE_LIST_SCALE_GAIN * f;
         itemView.setScaleX(scale);
         itemView.setScaleY(scale);
         View icon = findRowIconView(itemView);
         if (icon != null) {
-            icon.setTranslationX(waveCouplingDir * dpUnit * WAVE_LIST_ICON_PARALLAX_DP * f);
+            icon.setTranslationX(dpUnit * WAVE_LIST_ICON_PARALLAX_DP * f);
         }
     }
 
     private View findRowIconView(View itemView) {
         if ("app_row_v2".equals(itemView.getTag()) && itemView instanceof ViewGroup) {
             View card = ((ViewGroup) itemView).getChildAt(0);
-            if (card instanceof ViewGroup && ((ViewGroup) card).getChildCount() > 0) {
-                View icon = ((ViewGroup) card).getChildAt(0);
-                if (icon instanceof ImageView) return icon;
+            if (card instanceof ViewGroup) {
+                ViewGroup cg = (ViewGroup) card;
+                for (int i = 0; i < cg.getChildCount(); i++) {
+                    View c = cg.getChildAt(i);
+                    if (c instanceof ImageView) return c;
+                }
             }
         }
         return null;
@@ -1221,15 +1234,15 @@ public class MainActivity extends Activity {
 
     private void applyOneHandedListPadding() {
         if (streamListView == null) return;
-        int left = streamListView.getPaddingLeft();
-        int right = streamListView.getPaddingRight();
-        int topInset = currentTopInsetPx;
+        int left = dp(22);
+        int right = dp(34);
         int navBot = currentNavBottomPx;
 
         if (searchActive) {
-            int searchTopPad = topInset + dp(12);
+            int searchTopPad = dp(10);
             int searchBotPad = Math.max(navBot, currentImeBottomPx) + dp(82);
-            if (streamListView.getPaddingTop() != searchTopPad || streamListView.getPaddingBottom() != searchBotPad) {
+            if (streamListView.getPaddingLeft() != left || streamListView.getPaddingRight() != right
+                    || streamListView.getPaddingTop() != searchTopPad || streamListView.getPaddingBottom() != searchBotPad) {
                 streamListView.setPadding(left, searchTopPad, right, searchBotPad);
             }
             return;
@@ -1237,16 +1250,18 @@ public class MainActivity extends Activity {
 
         int botPad = navBot + dp(82);
         if (inAllAppsMode) {
-            int topP = topInset + dp(10);
-            if (streamListView.getPaddingTop() != topP || streamListView.getPaddingBottom() != botPad) {
+            int topP = dp(8);
+            if (streamListView.getPaddingLeft() != left || streamListView.getPaddingRight() != right
+                    || streamListView.getPaddingTop() != topP || streamListView.getPaddingBottom() != botPad) {
                 streamListView.setPadding(left, topP, right, botPad);
             }
             return;
         }
 
         // 首页一体流模式：顶部时钟自然贴合状态栏下方，剩余留白由 NiagaraHeaderView 底部呼吸垫片动态控制
-        int homeTopPad = topInset + dp(20);
-        if (streamListView.getPaddingTop() != homeTopPad || streamListView.getPaddingBottom() != botPad) {
+        int homeTopPad = dp(18);
+        if (streamListView.getPaddingLeft() != left || streamListView.getPaddingRight() != right
+                || streamListView.getPaddingTop() != homeTopPad || streamListView.getPaddingBottom() != botPad) {
             streamListView.setPadding(left, homeTopPad, right, botPad);
         }
         if (niagaraHeaderView == null) return;
@@ -1713,11 +1728,8 @@ public class MainActivity extends Activity {
 
     private void openSystemWeatherApp() {
         PendingIntent pi = NotificationHubService.weatherIntent;
-        if (pi != null) {
-            try {
-                pi.send();
-                return;
-            } catch (Throwable ignored) {}
+        if (pi != null && NotificationHubService.sendPendingIntentCompat(this, pi, null, null)) {
+            return;
         }
         String cachedPkg = NotificationHubService.weatherPackage;
         if (cachedPkg != null && !cachedPkg.isEmpty()) {
@@ -1951,7 +1963,7 @@ public class MainActivity extends Activity {
         return new PopupCardController(new PopupCardController.Host() {
             @Override public Activity getActivity() { return MainActivity.this; }
             @Override public FrameLayout getWorkspaceRoot() { return workspaceRoot; }
-            @Override public View[] getBlurTargets() { return new View[]{workspaceMainColumn, backdropView}; }
+            @Override public View[] getBlurTargets() { return new View[]{workspaceMainColumn, backdropView, coinButton}; }
             @Override public AuroraTheme getThemeObj() { return theme; }
             @Override public Typeface getTypeface() { return typeface; }
             @Override public float getDp() { return dpUnit; }
@@ -1974,6 +1986,16 @@ public class MainActivity extends Activity {
             }
             @Override public void startPopupShortcut(ShortcutInfo sc, AppEntry app) { MainActivity.this.startPopupShortcut(sc, app); }
             @Override public void launchApp(AppEntry app, View sourceView) { MainActivity.this.launchApp(app, sourceView); }
+            @Override public void launchAppOrNotification(AppEntry app, View sourceView) {
+                MainActivity.this.openAppOrNotificationTarget(app, sourceView, true);
+            }
+            @Override public void onPopupVisibilityChanged(boolean visible) {
+                if (rightWaveBar != null) {
+                    rightWaveBar.animate().cancel();
+                    rightWaveBar.animate().alpha(visible ? 0f : 1f).setDuration(140).start();
+                    rightWaveBar.setEnabled(!visible);
+                }
+            }
             @Override public void toggleFavorite(AppEntry app) { toggleFavoriteQuickly(app); }
             @Override public void openRenameApp(AppEntry app) { promptRenameApp(app); }
             @Override public void openCustomAppIcon(AppEntry app) { showCustomAppIconDialog(app); }
@@ -2036,7 +2058,7 @@ public class MainActivity extends Activity {
 
     private boolean hasClearableNotification(AppEntry app) {
         if (app == null || app.component == null) return false;
-        return NotificationHubService.hasClearableNotifications(app.component.getPackageName());
+        return NotificationHubService.hasClearableForApp(app.component.getPackageName(), app.user);
     }
 
     @Override
@@ -2152,7 +2174,7 @@ public class MainActivity extends Activity {
                     if (action == MotionEvent.ACTION_UP && targetApp != null && dx < -dp(56)) {
                         getWindow().getDecorView().performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
                         String pkg = targetApp.component.getPackageName();
-                        int cleared = NotificationHubService.cancelAllForPackage(pkg);
+                        int cleared = NotificationHubService.cancelAllForApp(pkg, targetApp.user);
                         if (cleared > 0) {
                             Toast.makeText(this, "已清除「" + targetApp.label + "」" + cleared + " 条通知", Toast.LENGTH_SHORT).show();
                         }
@@ -3041,7 +3063,6 @@ public class MainActivity extends Activity {
             List<AppEntry> list = entry.getValue();
 
             letterRowIndex.put(g, streamRows.size());
-            streamRows.add(new StreamRow(StreamRow.TYPE_SECTION, String.valueOf(g), null));
 
             List<AppEntry> sortedList = new ArrayList<>(list);
             Collections.sort(sortedList, (x, y) -> {
@@ -3051,13 +3072,15 @@ public class MainActivity extends Activity {
                 int c = x.fullPy.compareTo(y.fullPy);
                 return c != 0 ? c : x.label.compareTo(y.label);
             });
-            for (AppEntry a : sortedList) {
-                streamRows.add(new StreamRow(StreamRow.TYPE_ALL_APP, null, a));
+            for (int i = 0; i < sortedList.size(); i++) {
+                streamRows.add(new StreamRow(
+                        StreamRow.TYPE_ALL_APP,
+                        i == 0 ? String.valueOf(g) : "",
+                        sortedList.get(i)));
             }
         }
         if (virtualSettingsApp != null) {
-            streamRows.add(new StreamRow(StreamRow.TYPE_SECTION, "设置", null));
-            streamRows.add(new StreamRow(StreamRow.TYPE_ALL_APP, null, virtualSettingsApp));
+            streamRows.add(new StreamRow(StreamRow.TYPE_ALL_APP, "·", virtualSettingsApp));
         }
 
         streamAdapter.notifyDataSetChanged();
@@ -3168,12 +3191,15 @@ public class MainActivity extends Activity {
             }
 
             if (row.type == StreamRow.TYPE_CALC_RESULT) {
-                LinearLayout pill = convertView instanceof LinearLayout && "calc_row".equals(convertView.getTag())
-                        ? (LinearLayout) convertView : null;
+                FrameLayout wrap = convertView instanceof FrameLayout && "calc_row".equals(convertView.getTag())
+                        ? (FrameLayout) convertView : null;
                 TextView tv;
-                if (pill == null) {
-                    pill = new LinearLayout(MainActivity.this);
-                    pill.setTag("calc_row");
+                if (wrap == null) {
+                    wrap = new FrameLayout(MainActivity.this);
+                    wrap.setTag("calc_row");
+                    wrap.setPadding(0, dp(3), 0, dp(3));
+
+                    LinearLayout pill = new LinearLayout(MainActivity.this);
                     pill.setOrientation(LinearLayout.HORIZONTAL);
                     pill.setGravity(Gravity.CENTER_VERTICAL);
                     pill.setBackground(theme.accentGlowPill(dpUnit, 18));
@@ -3186,23 +3212,30 @@ public class MainActivity extends Activity {
 
                     tv = new TextView(MainActivity.this);
                     pill.addView(tv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+                    wrap.addView(pill, new FrameLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
                 } else {
+                    LinearLayout pill = (LinearLayout) wrap.getChildAt(0);
                     tv = (TextView) pill.getChildAt(1);
                 }
                 tv.setText("= " + row.text + "   · 点击复制");
                 tv.setTextColor(theme.accent);
                 tv.setTypeface(Typeface.create(typeface, Typeface.BOLD));
                 tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp(17));
-                return pill;
+                return wrap;
             }
 
             if (row.type == StreamRow.TYPE_WEB_SEARCH) {
-                LinearLayout pill = convertView instanceof LinearLayout && "web_row".equals(convertView.getTag())
-                        ? (LinearLayout) convertView : null;
+                FrameLayout wrap = convertView instanceof FrameLayout && "web_row".equals(convertView.getTag())
+                        ? (FrameLayout) convertView : null;
+                LinearLayout pill;
                 TextView tv;
-                if (pill == null) {
+                if (wrap == null) {
+                    wrap = new FrameLayout(MainActivity.this);
+                    wrap.setTag("web_row");
+                    wrap.setPadding(0, dp(3), 0, dp(3));
+
                     pill = new LinearLayout(MainActivity.this);
-                    pill.setTag("web_row");
                     pill.setOrientation(LinearLayout.HORIZONTAL);
                     pill.setGravity(Gravity.CENTER_VERTICAL);
                     pill.setBackground(theme.subtleGhostPill(dpUnit, 16));
@@ -3217,7 +3250,10 @@ public class MainActivity extends Activity {
                     tv.setSingleLine(true);
                     tv.setEllipsize(TextUtils.TruncateAt.END);
                     pill.addView(tv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+                    wrap.addView(pill, new FrameLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
                 } else {
+                    pill = (LinearLayout) wrap.getChildAt(0);
                     tv = (TextView) pill.getChildAt(1);
                 }
                 tv.setText("使用 " + getCurrentSearchEngineName() + " 搜索「" + row.text + "」");
@@ -3226,7 +3262,7 @@ public class MainActivity extends Activity {
                 tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp(13.8f));
                 final String qText = row.text;
                 pill.setOnClickListener(v -> openWebSearch(qText));
-                return pill;
+                return wrap;
             }
 
             final String cleanSearchQ = (searchActive && searchInput != null)
@@ -3342,7 +3378,7 @@ public class MainActivity extends Activity {
                             Drawable d = getShapedIcon(ma);
                             if (d != null) memberIcons.add(d);
                         }
-                        if (ma.component != null && NotificationHubService.activePackages.contains(ma.component.getPackageName())) {
+                        if (ma.component != null && NotificationHubService.hasUnreadForApp(ma.component.getPackageName(), ma.user)) {
                             anyUnread = true;
                         }
                     }
@@ -3425,6 +3461,7 @@ public class MainActivity extends Activity {
             boolean isFav = (row.type == StreamRow.TYPE_FAV_APP);
             LinearLayout outerWrap;
             LinearLayout cardRow;
+            TextView gutterView;
             ImageView iconView;
             TextView titleView, subNotifView;
             View popupIndicator;
@@ -3433,12 +3470,13 @@ public class MainActivity extends Activity {
             if (convertView instanceof LinearLayout && "app_row_v2".equals(convertView.getTag())) {
                 outerWrap = (LinearLayout) convertView;
                 cardRow = (LinearLayout) outerWrap.getChildAt(0);
-                iconView = (ImageView) cardRow.getChildAt(0);
-                LinearLayout textCol = (LinearLayout) cardRow.getChildAt(1);
+                gutterView = (TextView) cardRow.getChildAt(0);
+                iconView = (ImageView) cardRow.getChildAt(1);
+                LinearLayout textCol = (LinearLayout) cardRow.getChildAt(2);
                 titleView = (TextView) textCol.getChildAt(0);
                 subNotifView = (TextView) textCol.getChildAt(1);
-                popupIndicator = cardRow.getChildAt(2);
-                unreadBadge = cardRow.getChildAt(3);
+                popupIndicator = cardRow.getChildAt(3);
+                unreadBadge = cardRow.getChildAt(4);
             } else {
                 outerWrap = new LinearLayout(MainActivity.this);
                 outerWrap.setOrientation(LinearLayout.VERTICAL);
@@ -3447,6 +3485,10 @@ public class MainActivity extends Activity {
                 cardRow = new LinearLayout(MainActivity.this);
                 cardRow.setOrientation(LinearLayout.HORIZONTAL);
                 cardRow.setGravity(Gravity.CENTER_VERTICAL);
+
+                gutterView = new TextView(MainActivity.this);
+                gutterView.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+                gutterView.setSingleLine(true);
 
                 iconView = new ImageView(MainActivity.this);
                 LinearLayout textCol = new LinearLayout(MainActivity.this);
@@ -3475,6 +3517,8 @@ public class MainActivity extends Activity {
                 dotBg.setColor(theme.accent);
                 unreadBadge.setBackground(dotBg);
 
+                cardRow.addView(gutterView, new LinearLayout.LayoutParams(
+                        dp(26), ViewGroup.LayoutParams.WRAP_CONTENT));
                 cardRow.addView(iconView);
                 cardRow.addView(textCol, new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -3493,7 +3537,7 @@ public class MainActivity extends Activity {
                     v.animate().scaleX(0.96f).scaleY(0.96f).setDuration(55)
                             .withEndAction(() -> v.animate().scaleX(1f).scaleY(1f).setDuration(90).start())
                             .start();
-                    launchApp((AppEntry) tag, v);
+                    openAppOrNotificationTarget((AppEntry) tag, v, true);
                 });
                 cardRow.setOnLongClickListener(v -> {
                     if (isWaveScrubbing) return true;
@@ -3512,6 +3556,20 @@ public class MainActivity extends Activity {
 
             final AppEntry app = row.app;
             cardRow.setTag(app);
+
+            boolean showGutter = !isFav && row.text != null;
+            boolean isGroupHead = showGutter && !row.text.isEmpty();
+            if (showGutter) {
+                gutterView.setVisibility(View.VISIBLE);
+                gutterView.setText(row.text);
+                gutterView.setTypeface(Typeface.create(typeface, Typeface.BOLD));
+                gutterView.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp(13.5f));
+                boolean isGutterHighlight = highlightedGroup != 0 && row.text.length() == 1 && row.text.charAt(0) == highlightedGroup;
+                gutterView.setTextColor(isGutterHighlight ? theme.accent : theme.textPrimary);
+                gutterView.setAlpha(highlightedGroup == 0 ? 0.62f : (isGutterHighlight ? 1.0f : 0.22f));
+            } else {
+                gutterView.setVisibility(View.GONE);
+            }
 
             boolean showIcons = prefs.getBoolean(K_SHOW_ICONS, true);
             int iconBaseDp = isFav ? 40 : 35;
@@ -3545,21 +3603,21 @@ public class MainActivity extends Activity {
 
             String pkg = app.component != null ? app.component.getPackageName() : "";
             boolean useFavCards = isFav && prefs.getBoolean(K_FAV_CARDS, false);
-            boolean hasUnread = !pkg.isEmpty() && NotificationHubService.activePackages.contains(pkg);
+            boolean hasUnread = !pkg.isEmpty() && NotificationHubService.hasUnreadForApp(pkg, app.user);
             boolean hasPopupChildren = isFav && hasAppPopupChildren(app.idKey);
             int screenW = getResources().getDisplayMetrics().widthPixels;
-            int reservedW = dp(38 + 24 + (showIcons ? (iconBaseDp * Math.min(textScale, 1.15f) + 14) : 0)
+            int reservedW = dp(38 + 24 + (showGutter ? 26 : 0)
+                    + (showIcons ? (iconBaseDp * Math.min(textScale, 1.15f) + 14) : 0)
                     + (useFavCards ? 28 : 12) + (hasUnread ? 15 : 0) + (hasPopupChildren ? 16 : 0));
-            int availTextW = Math.max(dp(210), screenW - reservedW);
+            int availTextW = Math.max(dp(185), screenW - reservedW);
             titleView.setMaxWidth(availTextW);
             subNotifView.setMaxWidth(availTextW);
 
             outerWrap.setAlpha(isDimmed ? 0.30f : 1.0f);
 
             NotificationHubService.NotifItem notif = (!pkg.isEmpty() && prefs.getBoolean(K_INLINE_NOTIF, true))
-                    ? NotificationHubService.latestByPkg.get(pkg) : null;
-            Integer notifCountObj = !pkg.isEmpty() ? NotificationHubService.countByPkg.get(pkg) : null;
-            int notifCount = notifCountObj != null ? notifCountObj : 0;
+                    ? NotificationHubService.getLatestForApp(pkg, app.user) : null;
+            int notifCount = !pkg.isEmpty() ? NotificationHubService.getCountForApp(pkg, app.user) : 0;
             boolean hasNotif = (notif != null);
 
             if (hasNotif) {
@@ -3589,7 +3647,8 @@ public class MainActivity extends Activity {
                 cardRow.setBackground(null);
                 int vPad = dp((isFav ? 8.5f : 6.0f) * mul);
                 cardRow.setPadding(dp(2), vPad, dp(12), vPad);
-                outerWrap.setPadding(0, 0, 0, 0);
+                int groupTopGap = (isGroupHead && position > 0) ? dp(7f * mul) : 0;
+                outerWrap.setPadding(0, groupTopGap, 0, 0);
             }
             return outerWrap;
         }
@@ -4065,6 +4124,27 @@ public class MainActivity extends Activity {
         return false;
     }
 
+    private void openAppOrNotificationTarget(AppEntry app, View sourceView, boolean preferNotification) {
+        if (app == null) return;
+        if (preferNotification && app != virtualSettingsApp && !app.isShortcut && app.component != null) {
+            String pkg = app.component.getPackageName();
+            NotificationHubService.NotifItem notif = NotificationHubService.getLatestForApp(pkg, app.user);
+            if (notif != null && notif.contentIntent != null) {
+                boolean opened = NotificationHubService.openNotificationItem(this, notif, sourceView);
+                if (opened) {
+                    final AppEntry launchedApp = app;
+                    AppExecutors.getInstance().diskIO().execute(() -> recordAppLaunch(launchedApp));
+                    hideSoftKeyboard();
+                    uiHandler.postDelayed(() -> {
+                        if (searchActive) closeInstantSearch();
+                    }, 380);
+                    return;
+                }
+            }
+        }
+        launchApp(app, sourceView);
+    }
+
     private void launchApp(AppEntry app) {
         launchApp(app, null);
     }
@@ -4177,6 +4257,7 @@ public class MainActivity extends Activity {
 
         ScrollView scroll = new ScrollView(this);
         scroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        scroll.setVerticalScrollBarEnabled(false);
         LinearLayout container = new LinearLayout(this);
         container.setOrientation(LinearLayout.VERTICAL);
 
@@ -4357,10 +4438,18 @@ public class MainActivity extends Activity {
                 prefs.edit().putInt(K_DIM_PCT, pct).apply();
                 if (backdropView != null) backdropView.updateDimPercent(pct);
             }
-            @Override public void onWallLockOnlyChanged(boolean lockOnly) {
-                prefs.edit().putBoolean("wall_lock_only_v1", lockOnly).apply();
-                int styleIdx = Math.max(0, Math.min(5, prefs.getInt(K_WALL_STYLE_IDX, prefs.getInt(K_THEME_IDX, 0))));
-                applyWallpaperAndThemePreset(styleIdx);
+            @Override public void onSyncLockWallpaperChanged(boolean syncLock) {
+                prefs.edit().putBoolean("sync_lock_wallpaper_v1", syncLock).apply();
+                if (syncLock) {
+                    int curTheme = prefs.getInt(K_THEME_IDX, AuroraTheme.IDX_DEFAULT);
+                    if (curTheme >= 0 && curTheme <= 5) {
+                        applyWallpaperAndThemePreset(curTheme);
+                    } else {
+                        Toast.makeText(MainActivity.this, "已开启同步锁屏壁纸，切换主题或壁纸时将同步至锁屏", Toast.LENGTH_SHORT).show();
+                    }
+                } else {
+                    Toast.makeText(MainActivity.this, "已关闭同步锁屏壁纸，当前锁屏将被保留", Toast.LENGTH_SHORT).show();
+                }
             }
             @Override public void onFlowAnimChanged(boolean on) {
                 prefs.edit().putBoolean(K_FLOW_ANIM, on).apply();
@@ -5163,8 +5252,8 @@ public class MainActivity extends Activity {
     private void launchMediaPlayerApp() {
         if (activeMediaController == null) return;
         PendingIntent pi = activeMediaController.getSessionActivity();
-        if (pi != null) {
-            try { pi.send(); return; } catch (Throwable ignored) {}
+        if (pi != null && NotificationHubService.sendPendingIntentCompat(this, pi, null, null)) {
+            return;
         }
         Intent i = getPackageManager().getLaunchIntentForPackage(activeMediaController.getPackageName());
         if (i != null) startIntentSafely(i);
